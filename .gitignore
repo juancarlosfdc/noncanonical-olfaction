@@ -1,4 +1,4 @@
 outcmaes/
 *.png
-.npy
+*.npy
 sigma_sweep/*
