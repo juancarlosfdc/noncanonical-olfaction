@@ -162,7 +162,7 @@ def compute_rho(W, tol=None):
     return rho 
 
 
-def natural_gradient_dual_space(n_steps, W_init, c_init, key, loss, lr, os, phi, psi):
+def natural_gradient_dual_space(n_steps, W_init, c_init, key, loss, lr, os, phi, psi, verbose=True):
     value_and_grad = jax.value_and_grad(loss) # loss should be a function we minimize with W coming first
     trajectory = [W_init]
     entropies = [-os.compute_entropy_of_r(W_init, c_init, key)] 
@@ -179,7 +179,7 @@ def natural_gradient_dual_space(n_steps, W_init, c_init, key, loss, lr, os, phi,
         entropies.append(-os.compute_entropy_of_r(phi(U_current), cs, key))
         losses.append(loss(phi(U_current), cs, subkey)) 
         U_current = U_new
-        if n % print_interval == 0:
+        if n % print_interval == 0 and verbose: 
             print(f"Step {n}, Loss: {value}")
     return jnp.array(trajectory), entropies, losses
 
@@ -219,13 +219,14 @@ def plot_W_and_activity_in_2D(W_init, r_init, W_opt, r_opt, entropy, losses, rho
     return [ax1, ax2, ax3_top, ax3_bottom]
 
 
-def plot_trajectory(Ws, ents, losses): 
+def plot_trajectory(Ws, ents, losses, rhos, sigma_c, gamma): 
     fig, axs = plt.subplots(2, 1, height_ratios=[3, 1])
     ent, = axs[0].plot(ents, label='entropy', color='tab:blue') 
     axs[1].plot(losses, label=r"$\log |\Sigma|$")
     axs[1].set_xlabel('step') 
     axs[0].set_ylabel('-H(r)')
-    axs[0].set_title(r'$\sigma_c = 2.44$; $\gamma = 1$')
+    title = rf'$\sigma_c = {sigma_c:.2g}, \gamma = {gamma:.2g}$'
+    axs[0].set_title(title)
     ax2 = axs[0].twinx()
     rho, = ax2.plot(rhos, color='tab:orange', linestyle='--', label=r'$\rho$')
     ax2.set_ylabel(r'$\rho$')
