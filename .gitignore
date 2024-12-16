@@ -2,3 +2,5 @@ outcmaes/
 *.png
 *.npy
 sigma_sweep/*
+*.err
+*.out
