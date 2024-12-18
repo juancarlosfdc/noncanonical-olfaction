@@ -2,11 +2,11 @@
 #SBATCH --job-name=NMn_sigma_sweep       # Job name
 #SBATCH --output=NMn_sigma_sweep_%j.out # Standard output log (%j = job ID)
 #SBATCH --error=NMn_sigma_sweep_%j.err  # Error log
-#SBATCH --partition=sapphire            # Partition name
+#SBATCH --partition=test            # Partition name
 #SBATCH --nodes=1                       # Request 1 node
 #SBATCH --ntasks=1                      # 1 task (GNU Parallel handles parallelization)
-#SBATCH --cpus-per-task=10              # Number of cores to allocate on the node
-#SBATCH --time=02:00:00                 # Time limit (adjust as needed)
+#SBATCH --cpus-per-task=2             # Number of cores to allocate on the node
+#SBATCH --time=00:10:00                 # Time limit (adjust as needed)
 #SBATCH --mem=8G                        # Memory per node (adjust as needed)
 
 set -e
@@ -51,13 +51,13 @@ export PARALLEL="--jobs $SLURM_CPUS_PER_TASK"
 run_simulation_N() {
     N=$1
     echo "Running simulation for N=$N on $(hostname)"
-    python run_optimization.py --N $N --results_file N_sweep_results.txt --output_dir N_sweep
+    python run_optimization.py --N $N --M 13 --n 3 --results_file N_sweep_results.txt --output_dir N_sweep
 }
 
 run_simulation_M() {
     M=$1
     echo "Running simulation for M=$M on $(hostname)"
-    python run_optimization.py --M $M  --results_file M_sweep_results.txt --output_dir M_sweep
+    python run_optimization.py --N 50 --M $M --n 3 --results_file M_sweep_results.txt --output_dir M_sweep
 }
 
 run_simulation_n() {
@@ -86,8 +86,10 @@ parallel run_simulation_N ::: $(cat "$N_FILE")
 echo "Starting M sweep..."
 parallel run_simulation_M ::: $(cat "$M_FILE")
 
-echo "Starting n sweep..."
-parallel run_simulation_n ::: $(cat "$n_FILE")
+# echo "Starting n sweep..."
+# parallel run_simulation_n ::: $(cat "$n_FILE")
 
-echo "Starting sigma sweep..."
-parallel -j 7 run_simulation_sigma ::: $(cat "$SIGMA_FILE")
+# echo "Starting sigma sweep..."
+# parallel -j 7 run_simulation_sigma ::: $(cat "$SIGMA_FILE")
+
+echo "done!" 
