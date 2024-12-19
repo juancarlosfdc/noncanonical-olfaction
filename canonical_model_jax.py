@@ -69,6 +69,7 @@ class OlfactorySensing:
     def set_vasicek_window(self): 
         self.vasicek_window = jax.lax.stop_gradient(jnp.round(jnp.sqrt(self.P) + 0.5)).astype(int)
     
+    @jit 
     def draw_cs(self, key):
         # Split the key into subkeys for indices and concentrations
         subkeys = jax.random.split(key, self.P + 1)
@@ -109,7 +110,7 @@ class OlfactorySensing:
         entropy = self.compute_sum_of_marginal_entropies(r) - self.compute_information_of_r(r)
         return entropy
 
-    # @jit 
+    @jit 
     def compute_sum_of_marginal_entropies(self, r):
         compute_entropy_vmap = vmap(self._vasicek_entropy, in_axes=0)
         # Apply the vectorized function
@@ -117,7 +118,7 @@ class OlfactorySensing:
         # Sum the marginal entropies
         return jnp.sum(marginal_entropies)
 
-    # @jit 
+    @jit 
     def compute_information_of_r(self, r): 
         M, P = r.shape
         G = norm.ppf((rankdata(r.T, axis=0) / (P + 1)), loc=0, scale=1) # this is just ranking the data and making it normally distributed. 
