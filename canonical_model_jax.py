@@ -31,8 +31,8 @@ class OlfactorySensing:
         self.sigma_0 = sigma_0
         self.sigma_c = sigma_c
         self.set_sigma()
+        self.set_vasicek_window()
         self.W = None  # Initialize W as None; it may be set later with set_random_W
-        self.vasicek_window = None  # This will be set when draw_cs is called
 
     def _tree_flatten(self):
         # Treat `W` as a dynamic value, while the rest are static
@@ -66,17 +66,34 @@ class OlfactorySensing:
     def set_sigma(self): 
         self.sigma = lambda x: x / (1 + x) 
 
-    def draw_c(self, key): 
-        c = jnp.zeros(self.N)
-        non_zero_indices = jax.random.choice(key, self.N, shape=(self.n,), replace=False)
-        concentrations = jax.random.lognormal(key, sigma=self.sigma_c, shape=(self.n,))
-        c = c.at[non_zero_indices].set(concentrations)
-        return c
-
-    def draw_cs(self, key):
-        keys = jax.random.split(key, self.P)
+    def set_vasicek_window(self): 
         self.vasicek_window = jax.lax.stop_gradient(jnp.round(jnp.sqrt(self.P) + 0.5)).astype(int)
-        return jnp.array([self.draw_c(k) for k in keys]).T
+    
+    def draw_cs(self, key):
+        # Split the key into subkeys for indices and concentrations
+        subkeys = jax.random.split(key, self.P + 1)
+        indices_key = subkeys[0]
+        concentration_keys = subkeys[1:]
+
+        # Generate indices for all samples (P x n)
+        indices = jax.vmap(
+            lambda k: jax.random.choice(k, self.N, shape=(self.n,), replace=False)
+        )(jax.random.split(indices_key, self.P))
+
+        # Generate concentrations for all samples (P x n)
+        concentrations = jax.vmap(
+            lambda k: jax.random.lognormal(k, sigma=self.sigma_c, shape=(self.n,))
+        )(concentration_keys)
+
+        # Initialize the full samples matrix (P x N)
+        c = jnp.zeros((self.P, self.N))
+
+        # Scatter the concentrations into the appropriate indices
+        c = c.at[jnp.arange(self.P)[:, None], indices].set(concentrations)
+
+        # Return the result transposed
+        return c.T
+
 
     def set_random_W(self, key): 
         self.W = 1 / jnp.sqrt(self.N) * jax.random.normal(key, shape=(self.M, self.N))
