@@ -2,11 +2,11 @@
 #SBATCH --job-name=NMn_sigma_sweep       # Job name
 #SBATCH --output=NMn_sigma_sweep_%j.out # Standard output log (%j = job ID)
 #SBATCH --error=NMn_sigma_sweep_%j.err  # Error log
-#SBATCH --partition=test            # Partition name
+#SBATCH --partition=sapphire            # Partition name
 #SBATCH --nodes=1                       # Request 1 node
 #SBATCH --ntasks=1                      # 1 task (GNU Parallel handles parallelization)
-#SBATCH --cpus-per-task=2             # Number of cores to allocate on the node
-#SBATCH --time=00:10:00                 # Time limit (adjust as needed)
+#SBATCH --cpus-per-task=16           # Number of cores to allocate on the node
+#SBATCH --time=01:00:00                 # Time limit (adjust as needed)
 #SBATCH --mem=8G                        # Memory per node (adjust as needed)
 
 set -e

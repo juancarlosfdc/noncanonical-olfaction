@@ -9,7 +9,6 @@ import jax.numpy as jnp
 from jax import grad, value_and_grad, jit, vmap
 from jax.scipy.stats import norm, rankdata
 from jax.scipy.special import digamma
-from jax.scipy.special import gamma
 from jax.scipy.linalg import cho_factor, cho_solve
 from jax.example_libraries import optimizers
 from jax.scipy.linalg import cholesky
@@ -237,13 +236,13 @@ def plot_W_and_activity_in_2D(W_init, r_init, W_opt, r_opt, entropy, losses, rho
     return [ax1, ax2, ax3_top, ax3_bottom]
 
 
-def plot_trajectory(Ws, ents, losses, rhos, sigma_c, gamma): 
+def plot_trajectory(Ws, ents, losses, rhos, N, n, M, sigma_c, P, gamma): 
     fig, axs = plt.subplots(2, 1, height_ratios=[3, 1])
     ent, = axs[0].plot(ents, label='entropy', color='tab:blue') 
     axs[1].plot(losses, label=r"$-\log |\Sigma|$")
     axs[1].set_xlabel('step') 
     axs[0].set_ylabel('-H(r)')
-    title = rf'$\sigma_c = {sigma_c:.2g}, \gamma = {gamma:.2g}$'
+    title = rf'$N, n, M, \sigma_c, P, \gamma ={N}, {n}, {M}, {sigma_c:.2g}, {P}, {gamma:.2g}$'
     axs[0].set_title(title)
     ax2 = axs[0].twinx()
     rho, = ax2.plot(rhos, color='tab:orange', linestyle='--', label=r'$\rho$')
