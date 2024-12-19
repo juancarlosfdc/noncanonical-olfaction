@@ -240,7 +240,7 @@ def plot_W_and_activity_in_2D(W_init, r_init, W_opt, r_opt, entropy, losses, rho
 def plot_trajectory(Ws, ents, losses, rhos, sigma_c, gamma): 
     fig, axs = plt.subplots(2, 1, height_ratios=[3, 1])
     ent, = axs[0].plot(ents, label='entropy', color='tab:blue') 
-    axs[1].plot(losses, label=r"$\log |\Sigma|$")
+    axs[1].plot(losses, label=r"$-\log |\Sigma|$")
     axs[1].set_xlabel('step') 
     axs[0].set_ylabel('-H(r)')
     title = rf'$\sigma_c = {sigma_c:.2g}, \gamma = {gamma:.2g}$'
