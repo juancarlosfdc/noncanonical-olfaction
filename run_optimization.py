@@ -16,7 +16,7 @@ def run_optimization(N, n, M, sigma_c, P, gamma, output_dir):
     os.W = W_init
     os.cs = os.draw_cs(key=key)     
     normalized_gamma = gamma / jnp.sqrt(N * M)
-    Ws, ents, losses = natural_gradient_dual_space(50, W_init, os.cs, key, lambda * args: - os.log_det_sigma(*args), normalized_gamma, os, phi, psi)
+    Ws, ents, losses = natural_gradient_dual_space(5000, W_init, os.cs, key, lambda * args: - os.log_det_sigma(*args), normalized_gamma, os, phi, psi)
     rhos = rho_vectorized(Ws)
     fig = plot_trajectory(Ws, ents, losses, rhos, N, n, M, sigma_c, P, gamma)
     filename = f"{output_dir}/N_{N}_n_{n}_M_{M}_sigma_{sigma_c:.2g}_P_{P}_gamma_{gamma}"
