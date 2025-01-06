@@ -242,7 +242,10 @@ def plot_trajectory(Ws, ents, losses, rhos, N, n, M, sigma_c, P, gamma):
     axs[1].plot(losses, label=r"$-\log |\Sigma|$")
     axs[1].set_xlabel('step') 
     axs[0].set_ylabel('-H(r)')
-    title = rf'$N, n, M, \sigma_c, P, \gamma ={N}, {n}, {M}, {sigma_c:.2g}, {P}, {gamma:.2g}$'
+    base = f"{P:.2e}".split("e")[0]  # Extract the base
+    exponent = int(f"{P:.2e}".split("e")[1])  # Extract the exponent
+    formatted_P = f"10^{{{exponent}}}"
+    title = rf'$N, n, M, \sigma_c, P, \gamma ={N}, {n}, {M}, {sigma_c:.2g}, {formatted_P}, {gamma}$'
     axs[0].set_title(title)
     ax2 = axs[0].twinx()
     rho, = ax2.plot(rhos, color='tab:orange', linestyle='--', label=r'$\rho$')
