@@ -2,13 +2,14 @@
 #SBATCH --job-name=multi_sweep          # Job name
 #SBATCH --output=multi_sweep_%A_%a.out # Standard output log (%A = job ID, %a = array task ID)
 #SBATCH --error=multi_sweep_%A_%a.err  # Error log
-#SBATCH --partition=test           # Partition name
+#SBATCH --partition=sapphire           # Partition name
 #SBATCH --nodes=1                      # Request 1 node
 #SBATCH --ntasks=1                     # 1 task per job (1 parameter value per job)
 #SBATCH --cpus-per-task=4              # 1 CPU per task
 #SBATCH --time=00:30:00                # Time limit (adjust as needed)
 #SBATCH --mem=4G                       # Memory per job
 
+# usage: sbatch --array=1-10 figure_3_array_sweep.slurm gamma gamma_sweep_array where 10 is the number of lines in parameters_N.txt (or whatever param you want to sweep over)
 # Load Python environment
 module load python
 mamba activate olfaction
@@ -34,6 +35,7 @@ PARAM_VALUE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$PARAMETER_FILE")
 N=50
 M=13
 n=3
+P=10000
 sigma=2.0
 gamma=50
 
@@ -51,7 +53,7 @@ elif [ "$PARAMETER" == "gamma" ]; then
 fi
 
 # Debug information
-echo "Running sweep for $PARAMETER=$PARAM_VALUE (N=$N, M=$M, n=$n, sigma=$sigma, gamma=$gamma) on $(hostname)"
+echo "Running sweep for $PARAMETER=$PARAM_VALUE (N=$N, M=$M, n=$n, sigma=$sigma, P=$P, gamma=$gamma) on $(hostname)"
 
 # Run the simulation
-python run_optimization.py --N $N --M $M --n $n --sigma $sigma --gamma $gamma --results_file sweep_${PARAMETER}_results.txt --output_dir $OUTPUT_DIR
+python run_optimization.py --N $N --M $M --n $n --sigma $sigma --P $P --gamma $gamma --results_file sweep_${PARAMETER}_results.txt --output_dir $OUTPUT_DIR
