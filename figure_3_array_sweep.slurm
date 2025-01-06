@@ -5,7 +5,7 @@
 #SBATCH --partition=sapphire           # Partition name
 #SBATCH --nodes=1                      # Request 1 node
 #SBATCH --ntasks=1                     # 1 task per job (1 parameter value per job)
-#SBATCH --cpus-per-task=4              # 1 CPU per task
+#SBATCH --cpus-per-task=4             # 4 CPUs per task
 #SBATCH --time=00:30:00                # Time limit (adjust as needed)
 #SBATCH --mem=4G                       # Memory per job
 
@@ -20,6 +20,7 @@ which python
 # Parameter sweep definitions
 PARAMETER=$1
 OUTPUT_DIR=$2
+N_STEPS=${3:-500}
 PARAMETER_FILE="parameters_${PARAMETER}.txt"
 
 # Ensure parameter file exists
@@ -56,4 +57,4 @@ fi
 echo "Running sweep for $PARAMETER=$PARAM_VALUE (N=$N, M=$M, n=$n, sigma=$sigma, P=$P, gamma=$gamma) on $(hostname)"
 
 # Run the simulation
-python run_optimization.py --N $N --M $M --n $n --sigma $sigma --P $P --gamma $gamma --results_file sweep_${PARAMETER}_results.txt --output_dir $OUTPUT_DIR
+python run_optimization.noppf_entropy.py --N $N --M $M --n $n --sigma $sigma --P $P --n_steps $N_STEPS --gamma $gamma --results_file sweep_${PARAMETER}_results.txt --output_dir $OUTPUT_DIR
