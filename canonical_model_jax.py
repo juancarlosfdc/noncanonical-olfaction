@@ -108,7 +108,13 @@ class OlfactorySensing:
         r = self.compute_activity(W, c, key)
         entropy = self.compute_sum_of_marginal_entropies(r) - self.compute_information_of_r(r)
         return entropy
+    
 
+    def marginals_plus_log_det_loss(self, W, c, key): 
+        # this is very similar so self.compute_entropy_of_r, except we don't have a gaussianization step in there before computing log det. 
+        r = self.compute_activity(W, c, key)
+        pseudo_entropy = self.compute_sum_of_marginal_entropies(r) + self.log_det_sigma(W, c, key) 
+        return pseudo_entropy
     @jit 
     def compute_sum_of_marginal_entropies(self, r):
         compute_entropy_vmap = vmap(self._vasicek_entropy, in_axes=0)
