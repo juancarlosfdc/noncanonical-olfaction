@@ -4,4 +4,4 @@ outcmaes/
 sigma_sweep/*
 *.err
 *.out
-.txt
+*.txt
