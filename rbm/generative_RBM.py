@@ -236,7 +236,7 @@ class GenerativeRBM:
         [(ax.set_xticks([]), ax.set_yticks([])) for ax in axs.flatten()]
         for i in indices: 
             key, subkey = jax.random.split(self.key)
-            sample_idx = jax.random.choice(self.subkey, np.arange(samples.shape[2]), shape=(10, ), replace=False)
+            sample_idx = jax.random.choice(subkey, np.arange(samples.shape[2]), shape=(10, ), replace=False)
             dim = int(jnp.sqrt(samples.shape[1]))
             for ax_idx, j in enumerate(sample_idx): 
                 axs[i, ax_idx].imshow(samples[i, :, j].reshape(dim, dim)) 
