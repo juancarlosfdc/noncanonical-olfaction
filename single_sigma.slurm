@@ -18,4 +18,4 @@ mamba activate olfaction
 
 which python 
 
-python -u single_sigma.py --sigma 2.0 --results_file rho_vs_sigma.txt
+python -u train_RBM.slurm 
