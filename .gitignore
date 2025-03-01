@@ -5,3 +5,4 @@ sigma_sweep/*
 *.err
 *.out
 *.txt
+rbm/__pycache__/
