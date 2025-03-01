@@ -5,7 +5,7 @@ import jax.numpy as jnp
 rbm = GenerativeRBM(n_hidden=128)
 
 train_args = {'X_train': rbm.X_train, 
-              'epochs': 1000,
+              'epochs': 10000,
               'batch_size': 64, 
               'learning_rate': 0.01, 
               'k': 1, 
@@ -14,10 +14,10 @@ train_args = {'X_train': rbm.X_train,
 
 fig, axs, samples, err = rbm.plot_deviations_over_time(train_args)
 
-fig.savefig('devs.png') 
+fig.savefig('devs_10000.png') 
 
-jnp.save('samples', samples) 
+jnp.save('samples_10000', samples) 
 
 fig, ax = rbm.plot_samples(samples) 
-fig.savefig('samples.png') 
+fig.savefig('samples_10000.png') 
 

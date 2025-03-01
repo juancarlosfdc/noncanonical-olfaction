@@ -211,12 +211,12 @@ class GenerativeRBM:
 
     def plot_deviations_over_time(self, train_args):
         losses, samples = self.fit(**train_args)
-        fig, axs = plt.subplots(2, 1, height_ratios=[4, 1], sharex=True)
+        fig, axs = plt.subplots(2, 1, height_ratios=[4, 1])
         errors = jnp.array(jax.vmap(self.compute_rmse)(samples)) 
         background_mean, background_cov = self.compute_background_rmse()
-        axs[0].plot(errors[0, :], label='means rmse (samples vs data)') 
+        axs[0].scatter(errors[0, :], label='means rmse (samples vs data)') 
         axs[0].hlines(background_mean, 0, errors.shape[1] - 1, ls='--', color='tab:blue', label='means rmse (data vs data)')
-        axs[0].plot(errors[1, :], label='covs rmse (samples vs data)') 
+        axs[0].scatter(errors[1, :], label='covs rmse (samples vs data)') 
         axs[0].hlines(background_cov, 0, errors.shape[1] - 1, ls='--', color='tab:orange', label='covs rmse (data vs data)')
         axs[0].set_yscale('log')
         axs[1].plot(losses)
@@ -235,8 +235,8 @@ class GenerativeRBM:
         fig, axs = plt.subplots(10, 10, figsize=(20, 20)) 
         [(ax.set_xticks([]), ax.set_yticks([])) for ax in axs.flatten()]
         for i in indices: 
-            key, subkey = jax.random.split(key)
-            sample_idx = jax.random.choice(self.subkey, np.arange(samples.shape[2]), shape=(10, ), replace=False)
+            key, subkey = jax.random.split(self.key)
+            sample_idx = jax.random.choice(subkey, np.arange(samples.shape[2]), shape=(10, ), replace=False)
             dim = int(jnp.sqrt(samples.shape[1]))
             for ax_idx, j in enumerate(sample_idx): 
                 axs[i, ax_idx].imshow(samples[i, :, j].reshape(dim, dim), cmap='grey') 
