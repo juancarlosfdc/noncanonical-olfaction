@@ -235,7 +235,7 @@ class GenerativeRBM:
         fig, axs = plt.subplots(10, 10, figsize=(20, 20)) 
         [(ax.set_xticks([]), ax.set_yticks([])) for ax in axs.flatten()]
         for i in indices: 
-            key, subkey = self.key.split(key)
+            key, subkey = jax.random.split(key)
             sample_idx = jax.random.choice(self.subkey, np.arange(samples.shape[2]), shape=(10, ), replace=False)
             dim = int(jnp.sqrt(samples.shape[1]))
             for ax_idx, j in enumerate(sample_idx): 
