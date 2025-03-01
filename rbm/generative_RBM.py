@@ -38,8 +38,8 @@ class GenerativeRBM:
             print("Data shape:", X.shape)
             X = (X > 0.5).astype(np.float32)  # Binarize the data
         else:
-            # Assume CSV has samples as rows; transpose to get columns as samples.
-            X = pd.read_csv(data_path, index_col=0).values.T
+            X = pd.read_csv(data_path, index_col=0).values # this is assumed to be in (n_features, n_samples) format, with an index column. 
+            # X = np.load(data_path) # this is assumed to be in (n_features, n_samples) format
         # Split into training and test sets.
         # train_test_split expects samples as rows, so we transpose before and after splitting.
         X_train, X_test = train_test_split(X.T, test_size=0.2, random_state=int(self.key[0]))
