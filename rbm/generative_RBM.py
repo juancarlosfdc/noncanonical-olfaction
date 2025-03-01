@@ -226,3 +226,19 @@ class GenerativeRBM:
         axs[0].legend()
         return fig, axs, samples, errors 
     
+    def plot_samples(self, samples, indices=None): 
+        # samples is assumed to be timepoints x num_variables x num_samples. indices is a subset of range(len(timepoints)), so you can plot a subset if needed. 
+        if indices is None: 
+            indices = range(len(samples))
+        if len(indices) > 10: 
+            indices = range(0, len(indices), len(indices) // 10) 
+        fig, axs = plt.subplots(10, 10, figsize=(20, 20)) 
+        [(ax.set_xticks([]), ax.set_yticks([])) for ax in axs.flatten()]
+        for i in indices: 
+            key, subkey = self.key.split(key)
+            sample_idx = jax.random.choice(self.subkey, np.arange(samples.shape[2]), shape=(10, ), replace=False)
+            dim = int(jnp.sqrt(samples.shape[1]))
+            for ax_idx, j in enumerate(sample_idx): 
+                axs[i, ax_idx].imshow(samples[i, :, j].reshape(dim, dim)) 
+        return fig, axs 
+    
