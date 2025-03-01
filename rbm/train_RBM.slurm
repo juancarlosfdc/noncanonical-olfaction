@@ -6,7 +6,7 @@
 #SBATCH --nodes=1                      # Request 1 node
 #SBATCH --ntasks=1                     # 1 task 
 #SBATCH --cpus-per-task=4             # Number of cores to allocate on the node
-#SBATCH --time=00:10:00                # Time limit (adjust as needed)
+#SBATCH --time=02:00:00                # Time limit (adjust as needed)
 #SBATCH --mem=4G                       # Memory per node (adjust as needed)
 
 set -e 
