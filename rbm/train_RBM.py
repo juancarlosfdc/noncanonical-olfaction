@@ -14,7 +14,10 @@ train_args = {'X_train': rbm.X_train,
 
 fig, axs, samples, err = rbm.plot_deviations_over_time(train_args)
 
-fig.savefig('tmp.png') 
+fig.savefig('devs.png') 
 
 jnp.save('samples', samples) 
+
+fig, ax = rbm.plot_samples(samples) 
+fig.savefig('samples.png') 
 
