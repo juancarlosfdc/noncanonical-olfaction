@@ -1,23 +1,39 @@
 from generative_RBM import GenerativeRBM
 import jax.numpy as jnp
+import sys
+import os 
+import json 
+import shutil 
 
+# read arguments and copy training arguments into output directory 
+job_id = sys.argv[1] 
+arg_dict_path = sys.argv[2] 
 
+os.mkdir(job_id)
+
+with open(arg_dict_path, 'r') as adp: 
+    train_args = json.load(adp)
+
+parameter_path = os.path.join(job_id, 'parameters.json') 
+
+shutil.copy2(arg_dict_path, parameter_path) 
+
+# load rbm class and run the code 
 rbm = GenerativeRBM(n_hidden=128)
-
-train_args = {'X_train': rbm.X_train, 
-              'epochs': 10000,
-              'batch_size': 64, 
-              'learning_rate': 0.01, 
-              'k': 1, 
-              'l2_reg': 0.0, 
-              'sample_number': 1000}
-
 fig, axs, samples, err = rbm.plot_deviations_over_time(train_args)
 
-fig.savefig('devs_10000.png') 
+# create output paths and write outputs 
+deviation_numpy_path = os.path.join(job_id, 'moment_deviations') 
+deviation_png_path = os.path.join(job_id, 'moment_deviations.png')
 
-jnp.save('samples_10000', samples) 
+jnp.save(deviation_numpy_path, err) 
+fig.savefig(deviation_png_path) 
+
+samples_numpy_path = os.path.join(job_id, 'samples') 
+samples_png_path = os.path.join(job_id, 'samples.png') 
+
 
 fig, ax = rbm.plot_samples(samples) 
-fig.savefig('samples_10000.png') 
 
+jnp.save(samples_numpy_path, samples) 
+fig.savefig(samples_png_path)  

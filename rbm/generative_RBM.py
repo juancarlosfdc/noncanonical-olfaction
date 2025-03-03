@@ -172,7 +172,7 @@ class GenerativeRBM:
         mean_devs, cov_devs = self.compute_squared_deviations(samples)
         return jnp.sqrt(jnp.mean(mean_devs)), jnp.sqrt(jnp.mean(cov_devs.flatten()))
 
-    def fit(self, X_train, epochs=10, batch_size=64, learning_rate=0.01, k=1, l2_reg=0.0, sample_number=1000):
+    def fit(self, epochs=10, batch_size=64, learning_rate=0.01, k=1, l2_reg=0.0, sample_number=1000):
         """
         Trains the RBM on the training data.
         
@@ -189,12 +189,12 @@ class GenerativeRBM:
           losses: A list of reconstruction losses per epoch.
           sample_list: An array containing generated samples at intervals.
         """
-        num_samples = X_train.shape[1]
+        num_samples = self.X_train.shape[1]
         losses = []
         sample_list = []
         # Shuffle training data along the sample axis (columns).
         permutation = np.random.permutation(num_samples)
-        X_train = X_train[:, permutation]
+        X_train = self.X_train[:, permutation]
         for epoch in range(epochs):
             epoch_loss = 0.0
             for i in range(0, num_samples, batch_size):
@@ -214,9 +214,9 @@ class GenerativeRBM:
         fig, axs = plt.subplots(2, 1, height_ratios=[4, 1])
         errors = jnp.array(jax.vmap(self.compute_rmse)(samples)) 
         background_mean, background_cov = self.compute_background_rmse()
-        axs[0].scatter(errors[0, :], label='means rmse (samples vs data)') 
+        axs[0].scatter(range(errors.shape[1]), errors[0, :], label='means rmse (samples vs data)') 
         axs[0].hlines(background_mean, 0, errors.shape[1] - 1, ls='--', color='tab:blue', label='means rmse (data vs data)')
-        axs[0].scatter(errors[1, :], label='covs rmse (samples vs data)') 
+        axs[0].scatter(range(errors.shape[1]), errors[1, :], label='covs rmse (samples vs data)') 
         axs[0].hlines(background_cov, 0, errors.shape[1] - 1, ls='--', color='tab:orange', label='covs rmse (data vs data)')
         axs[0].set_yscale('log')
         axs[1].plot(losses)

@@ -7,3 +7,4 @@ sigma_sweep/*
 *.txt
 rbm/__pycache__/
 __pycache__/
+*.json
