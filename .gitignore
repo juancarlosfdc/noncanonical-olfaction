@@ -8,3 +8,4 @@ sigma_sweep/*
 rbm/__pycache__/
 __pycache__/
 *.json
+*.csv
