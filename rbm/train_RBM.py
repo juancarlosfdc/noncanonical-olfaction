@@ -30,10 +30,16 @@ jnp.save(deviation_numpy_path, err)
 fig.savefig(deviation_png_path) 
 
 samples_numpy_path = os.path.join(job_id, 'samples') 
+
 samples_png_path = os.path.join(job_id, 'samples.png') 
 
 
 fig, ax = rbm.plot_samples(samples) 
+
+reg = train_args['l2_reg']
+exp = jnp.log10(reg) 
+
+fig.suptitle(rf'$10^{{{exp:.2f}}}$', size=40) 
 
 jnp.save(samples_numpy_path, samples) 
 fig.savefig(samples_png_path)  
