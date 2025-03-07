@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 
 class GenerativeRBM:
-    def __init__(self, n_hidden, data_path=None, key=None):
+    def __init__(self, n_hidden, data_path=None, key=None, W_scale=0.01):
         """
         Initializes the RBM with the given number of hidden units.
         Data is expected to be arranged such that each column is a sample
@@ -26,9 +26,9 @@ class GenerativeRBM:
         self.key, subkey = random.split(self.key)
         # Initialize weights and biases.
         # W has shape (n_hidden, n_visible)
-        self.W = random.normal(subkey, shape=(n_hidden, self.n_visible)) * 0.1
+        self.W = random.normal(subkey, shape=(n_hidden, self.n_visible)) * W_scale
         self.h_bias = jnp.zeros((n_hidden,))
-        self.v_bias = jnp.zeros((self.n_visible,))
+        self.v_bias = self.initialize_v_bias() 
 
     def load_data(self, data_path):
         if data_path is None:
@@ -49,6 +49,13 @@ class GenerativeRBM:
         self.X_train = X_train
         self.X_test = X_test
         return X
+    
+    def initialize_v_bias(self): 
+        v_probs = jnp.sum(self.data, axis=1) / self.data.shape[1] 
+        nonzero = v_probs[v_probs > 0]
+        v_probs = jnp.where(v_probs == 0, jnp.min(nonzero), v_probs)
+        v_bias_init = jnp.log(v_probs / (1 - v_probs))
+        return v_bias_init 
 
     def sigmoid(self, x):
         return 1.0 / (1.0 + jnp.exp(-x))
@@ -134,6 +141,104 @@ class GenerativeRBM:
             samples, _ = self.sample_v(h)
         return samples
 
+    def fit(self, epochs=10, batch_size=64, learning_rate=0.01, k=1, l2_reg=0.0, sample_number=1000):
+        """
+        Trains the RBM on the training data.
+        
+        Parameters:
+          X_train (array): Training data as a JAX array with shape (n_visible, n_train),
+                           where each column is a sample.
+          epochs (int): Number of epochs.
+          batch_size (int): Number of samples per batch.
+          learning_rate (float): Learning rate.
+          k (int): Number of Gibbs sampling steps per batch.
+          l2_reg (float): L2 regularization coefficient.
+          
+        Returns:
+          losses: A list of reconstruction losses per epoch.
+          sample_list: An array containing generated samples at intervals.
+        """
+        num_samples = self.X_train.shape[1]
+        losses = []
+        sample_list = []
+        # Shuffle training data along the sample axis (columns).
+        permutation = np.random.permutation(num_samples)
+        X_train = self.X_train[:, permutation]
+        for epoch in range(epochs):
+            epoch_loss = 0.0
+            for i in range(0, num_samples, batch_size):
+                batch = X_train[:, i:i+batch_size]
+                self.train_batch_pcd(batch, learning_rate=learning_rate, k=k, l2_reg=l2_reg)
+                v_recon = self.reconstruct(batch)
+                epoch_loss += jnp.sum((batch - v_recon) ** 2)
+            losses.append(epoch_loss)
+            if (epoch * 10) % epochs == 0:
+                print(f"Epoch {epoch}/{epochs}, Reconstruction Loss: {epoch_loss:.4f}")
+                samples = self.generate(sample_number, gibbs_steps=1000)
+                sample_list.append(samples)
+        return losses, jnp.array(sample_list)
+    
+    def persistent_contrastive_divergence(self, k=1, batch_size=None):
+        """
+        Performs k steps of Gibbs sampling on a persistent chain.
+        The persistent chain is maintained across updates.
+        
+        Parameters:
+        k (int): Number of Gibbs steps.
+        batch_size (int): The number of fantasy samples to maintain. This should
+                            match the mini-batch size used in training.
+        
+        Returns:
+        vk: The updated persistent chain, used as the negative samples.
+        """
+        # If the persistent chain does not exist, initialize it.
+        if not hasattr(self, 'persistent_chain'):
+            if batch_size is None:
+                raise ValueError("batch_size must be provided for initializing the persistent chain")
+            # Initialize persistent chain with random binary states.
+            self.key, subkey = random.split(self.key)
+            self.persistent_chain = random.bernoulli(subkey, p=jnp.full((self.n_visible, batch_size), 0.5)).astype(jnp.float32)
+        
+        chain = self.persistent_chain
+        # Update the persistent chain with k full Gibbs steps.
+        for _ in range(k):
+            h, _ = self.sample_h(chain)
+            chain, _ = self.sample_v(h)
+        
+        # Store the updated chain for the next update.
+        self.persistent_chain = chain
+        return chain
+
+    def train_batch_pcd(self, v0, learning_rate=0.01, k=1, l2_reg=0.0):
+        """
+        Updates the RBM parameters using Persistent Contrastive Divergence (PCD).
+        Instead of initializing the chain from the data v0 for the negative phase,
+        a persistent chain is maintained and updated.
+        
+        Parameters:
+          v0 (array): Batch of visible units with shape (n_visible, batch_size).
+          learning_rate (float): Learning rate.
+          k (int): Number of Gibbs steps to update the persistent chain.
+          l2_reg (float): L2 regularization coefficient.
+        """
+        # Positive phase: sample hidden units from the data.
+        h0, _ = self.sample_h(v0)
+        # Negative phase: update and retrieve fantasy samples from the persistent chain.
+        vk = self.persistent_contrastive_divergence(k, batch_size=v0.shape[1])
+        hk, _ = self.sample_h(vk)
+        
+        batch_size = v0.shape[1]
+        # Compute gradients using the difference between positive and negative phases.
+        delta_W = jnp.dot(h0, v0.T) - jnp.dot(hk, vk.T)
+        delta_v_bias = jnp.sum(v0 - vk, axis=1)
+        delta_h_bias = jnp.sum(h0 - hk, axis=1)
+        
+        # Update parameters with learning rate and optional L2 regularization.
+        self.W = self.W + learning_rate * (delta_W / batch_size - l2_reg * self.W)
+        self.v_bias = self.v_bias + learning_rate * delta_v_bias / batch_size
+        self.h_bias = self.h_bias + learning_rate * delta_h_bias / batch_size
+
+    
     @staticmethod
     def compute_averages(samples):
         """
@@ -171,43 +276,6 @@ class GenerativeRBM:
     def compute_rmse(self, samples):
         mean_devs, cov_devs = self.compute_squared_deviations(samples)
         return jnp.sqrt(jnp.mean(mean_devs)), jnp.sqrt(jnp.mean(cov_devs.flatten()))
-
-    def fit(self, epochs=10, batch_size=64, learning_rate=0.01, k=1, l2_reg=0.0, sample_number=1000):
-        """
-        Trains the RBM on the training data.
-        
-        Parameters:
-          X_train (array): Training data as a JAX array with shape (n_visible, n_train),
-                           where each column is a sample.
-          epochs (int): Number of epochs.
-          batch_size (int): Number of samples per batch.
-          learning_rate (float): Learning rate.
-          k (int): Number of Gibbs sampling steps per batch.
-          l2_reg (float): L2 regularization coefficient.
-          
-        Returns:
-          losses: A list of reconstruction losses per epoch.
-          sample_list: An array containing generated samples at intervals.
-        """
-        num_samples = self.X_train.shape[1]
-        losses = []
-        sample_list = []
-        # Shuffle training data along the sample axis (columns).
-        permutation = np.random.permutation(num_samples)
-        X_train = self.X_train[:, permutation]
-        for epoch in range(epochs):
-            epoch_loss = 0.0
-            for i in range(0, num_samples, batch_size):
-                batch = X_train[:, i:i+batch_size]
-                self.train_batch(batch, learning_rate=learning_rate, k=k, l2_reg=l2_reg)
-                v_recon = self.reconstruct(batch)
-                epoch_loss += jnp.sum((batch - v_recon) ** 2)
-            losses.append(epoch_loss)
-            if (epoch * 10) % epochs == 0:
-                print(f"Epoch {epoch}/{epochs}, Reconstruction Loss: {epoch_loss:.4f}")
-                samples = self.generate(sample_number, gibbs_steps=1000)
-                sample_list.append(samples)
-        return losses, jnp.array(sample_list)
 
     def plot_deviations_over_time(self, train_args):
         losses, samples = self.fit(**train_args)
