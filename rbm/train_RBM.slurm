@@ -6,9 +6,9 @@
 #SBATCH --nodes=1                      # Request 1 node
 #SBATCH --ntasks=1                     # 1 task 
 #SBATCH --cpus-per-task=4            # Number of cores to allocate on the node
-#SBATCH --time=00:10:00                # Time limit (adjust as needed)
+#SBATCH --time=01:00:00                # Time limit (adjust as needed)
 #SBATCH --mem=4G                       # Memory per node (adjust as needed)
-#SBATCH --array=0-12                      # Create an array of 13 tasks (indices 0 through 12)
+#SBATCH --array=0-48                    # Create an array of 13 tasks (indices 0 through 12)
 
 
 # this script requires one command line argument: the path to a json file with all the parameters for training the rbm. 
