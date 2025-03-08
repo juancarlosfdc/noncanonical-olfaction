@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 
 class GenerativeRBM:
-    def __init__(self, n_hidden, data_path=None, key=None, W_scale=0.01):
+    def __init__(self, n_hidden, data_path=None, key=None, W_scale=0.01, digits=None):
         """
         Initializes the RBM with the given number of hidden units.
         Data is expected to be arranged such that each column is a sample
@@ -19,7 +19,7 @@ class GenerativeRBM:
         if key is None:
             key = random.PRNGKey(0)
         self.key = key
-        self.data = self.load_data(data_path)
+        self.data = self.load_data(data_path, digits)
         self.set_empirical_means()
         self.n_visible = self.data.shape[0]  # each row is a variable
         self.n_hidden = n_hidden
@@ -30,11 +30,15 @@ class GenerativeRBM:
         self.h_bias = jnp.zeros((n_hidden,))
         self.v_bias = self.initialize_v_bias() 
 
-    def load_data(self, data_path):
+    def load_data(self, data_path, digits):
         if data_path is None:
             mnist = fetch_openml('mnist_784', version=1)
+            data = mnist.data
+            target = mnist.target
+            if digits is not None: 
+                data = mnist.data[mnist.target.isin([str(d) for d in digits])] 
             # Original shape is (n_samples, n_features). Transpose to have shape (n_features, n_samples).
-            X = np.array(mnist.data.T, dtype=np.float32) / 255.0  # Normalize to [0,1]
+            X = np.array(data.T, dtype=np.float32) / 255.0  # Normalize to [0,1]
             print("Data shape:", X.shape)
             X = (X > 0.5).astype(np.float32)  # Binarize the data
         else:
@@ -168,6 +172,8 @@ class GenerativeRBM:
             epoch_loss = 0.0
             for i in range(0, num_samples, batch_size):
                 batch = X_train[:, i:i+batch_size]
+                if batch.shape[1] != batch_size: 
+                    continue 
                 self.train_batch_pcd(batch, learning_rate=learning_rate, k=k, l2_reg=l2_reg)
                 v_recon = self.reconstruct(batch)
                 epoch_loss += jnp.sum((batch - v_recon) ** 2)
