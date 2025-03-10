@@ -64,29 +64,19 @@ class GenerativeRBM:
     def sigmoid(self, x):
         return 1.0 / (1.0 + jnp.exp(-x))
 
-    def sample_h(self, v):
-        """
-        Given a batch of visible units (v) with shape (n_visible, batch_size),
-        sample the hidden units.
-        Returns both the binary samples and their probabilities.
-        """
-        # Compute hidden activations: shape (n_hidden, batch_size)
+    def sample_h(self, v, key):
+        """Sample hidden units with explicit key handling."""
+        key, subkey = random.split(key)
         p_h = self.sigmoid(jnp.dot(self.W, v) + self.h_bias[:, None])
-        self.key, subkey = random.split(self.key)
         h = random.bernoulli(subkey, p_h).astype(jnp.float32)
-        return h, p_h
+        return h, p_h, key  # Return updated key
 
-    def sample_v(self, h):
-        """
-        Given a batch of hidden units (h) with shape (n_hidden, batch_size),
-        sample the visible units.
-        Returns both the binary samples and their probabilities.
-        """
-        # Compute visible activations: shape (n_visible, batch_size)
+    def sample_v(self, h, key):
+        """Sample visible units with explicit key handling."""
+        key, subkey = random.split(key)
         p_v = self.sigmoid(jnp.dot(self.W.T, h) + self.v_bias[:, None])
-        self.key, subkey = random.split(self.key)
         v = random.bernoulli(subkey, p_v).astype(jnp.float32)
-        return v, p_v
+        return v, p_v, key
 
     def contrastive_divergence(self, v0, k=1):
         """
@@ -128,22 +118,23 @@ class GenerativeRBM:
         v is expected to have shape (n_visible, batch_size).
         """
         return self.contrastive_divergence(v, k)
-
-    def generate(self, n_samples, gibbs_steps=100):
-        """
-        Generates new samples from the model by starting with random noise and
-        running Gibbs sampling for a specified number of steps.
-        
-        Returns:
-          samples with shape (n_visible, n_samples), where each column is a sample.
-        """
-        self.key, subkey = random.split(self.key)
-        # Initialize samples with shape (n_visible, n_samples)
+    
+    def generate(self, n_samples, gibbs_steps=100, key=None):
+        """Generate samples with explicit key management."""
+        if key is None:
+            key = self.key  # Use class key if none provided
+        key, subkey = random.split(key)
+        # Initialize samples with fresh key
         samples = random.bernoulli(subkey, p=jnp.ones((self.n_visible, n_samples)) * 0.5).astype(jnp.float32)
+        
+        # Gibbs sampling with explicit key passing
         for _ in range(gibbs_steps):
-            h, _ = self.sample_h(samples)
-            samples, _ = self.sample_v(h)
-        return samples
+            key, subkey = random.split(key)
+            h, _, key = self.sample_h(samples, subkey)
+            key, subkey = random.split(key)
+            samples, _, key = self.sample_v(h, subkey)
+        
+        return samples, key  # Return samples and updated key
 
     def fit(self, epochs=10, batch_size=64, learning_rate=0.01, k=1, l2_reg=0.0, sample_number=1000):
         """
@@ -184,36 +175,28 @@ class GenerativeRBM:
                 sample_list.append(samples)
         return losses, jnp.array(sample_list)
     
-    def persistent_contrastive_divergence(self, k=1, batch_size=None):
-        """
-        Performs k steps of Gibbs sampling on a persistent chain.
-        The persistent chain is maintained across updates.
-        
-        Parameters:
-        k (int): Number of Gibbs steps.
-        batch_size (int): The number of fantasy samples to maintain. This should
-                            match the mini-batch size used in training.
-        
-        Returns:
-        vk: The updated persistent chain, used as the negative samples.
-        """
-        # If the persistent chain does not exist, initialize it.
+    def persistent_contrastive_divergence(self, k=1, batch_size=None, key=None):
+        """Persistent chain with explicit key handling."""
+        if key is None:
+            key = self.key
+        # Initialize persistent chain if needed
         if not hasattr(self, 'persistent_chain'):
-            if batch_size is None:
-                raise ValueError("batch_size must be provided for initializing the persistent chain")
-            # Initialize persistent chain with random binary states.
-            self.key, subkey = random.split(self.key)
-            self.persistent_chain = random.bernoulli(subkey, p=jnp.full((self.n_visible, batch_size), 0.5)).astype(jnp.float32)
+            key, subkey = random.split(key)
+            self.persistent_chain = random.bernoulli(
+                subkey, 
+                p=jnp.full((self.n_visible, batch_size), 0.5)
+            ).astype(jnp.float32)
         
+        # Update chain with fresh keys
         chain = self.persistent_chain
-        # Update the persistent chain with k full Gibbs steps.
         for _ in range(k):
-            h, _ = self.sample_h(chain)
-            chain, _ = self.sample_v(h)
+            key, subkey = random.split(key)
+            h, _, key = self.sample_h(chain, subkey)
+            key, subkey = random.split(key)
+            chain, _, key = self.sample_v(h, subkey)
         
-        # Store the updated chain for the next update.
         self.persistent_chain = chain
-        return chain
+        return chain, key
 
     def train_batch_pcd(self, v0, learning_rate=0.01, k=1, l2_reg=0.0):
         """
