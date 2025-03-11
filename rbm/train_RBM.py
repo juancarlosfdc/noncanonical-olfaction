@@ -10,16 +10,16 @@ job_id = sys.argv[1]
 arg_dict_path = sys.argv[2]
 
 with open(arg_dict_path, 'r') as adp: 
-    train_args = json.load(adp)
+    hyperparameters = json.load(adp)
 
 
-reg = train_args['l2_reg']
-lr = train_args['learning_rate']
+reg = hyperparameters['l2_reg']
+lr = hyperparameters['learning_rate']
 lambda_exp = jnp.log10(reg) 
 lr_exp = jnp.log10(lr) 
 
-output_dir_name = f"gamma_lambda_sweep/lambda_${lambda_exp:.2f}_gamma_${lr_exp:.2f}$"
-os.mkdir(output_dir_name)
+output_dir_name = f"epochs_200/lambda_{lambda_exp:.2f}_gamma_{lr_exp:.2f}"
+os.makedirs(output_dir_name, exist_ok=True) 
 
 
 parameter_path = os.path.join(output_dir_name, 'parameters.json') 
@@ -27,8 +27,10 @@ parameter_path = os.path.join(output_dir_name, 'parameters.json')
 shutil.copy2(arg_dict_path, parameter_path) 
 
 # load rbm class and run the code 
-rbm = GenerativeRBM(n_hidden=128)
-fig, axs, samples, err = rbm.plot_deviations_over_time(train_args)
+rbm = GenerativeRBM(n_hidden=hyperparameters['n_hidden'], digits=[5])
+hyperparameters.pop('n_hidden') 
+
+fig, axs, samples, err = rbm.plot_deviations_over_time(hyperparameters)
 
 # create output paths and write outputs 
 deviation_numpy_path = os.path.join(output_dir_name, 'moment_deviations') 
@@ -36,10 +38,10 @@ deviation_png_path = os.path.join(output_dir_name, 'moment_deviations.png')
 
 jnp.save(deviation_numpy_path, err) 
 
-reg = train_args['l2_reg']
+reg = hyperparameters['l2_reg']
 exp = jnp.log10(reg) 
 
-fig.suptitle(rf'$10^{{{exp:.2f}}}$', size=40) 
+fig.suptitle(rf'$10^{{{exp:.2f}}}$', size=20) 
 
 fig.savefig(deviation_png_path) 
 
