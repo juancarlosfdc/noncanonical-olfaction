@@ -76,20 +76,20 @@ class GenerativeRBM:
         key, subkey = random.split(key)
         p_v = self.sigmoid(jnp.dot(self.W.T, h) + self.v_bias[:, None])
         v = random.bernoulli(subkey, p_v).astype(jnp.float32)
-        return v, p_v, key
+        return v, p_v, key   # Return updated key
 
-    def contrastive_divergence(self, v0, k=1):
-        """
-        Performs k steps of Gibbs sampling starting at the visible units v0.
-        v0 is expected to have shape (n_visible, batch_size).
-        """
+    def contrastive_divergence(self, v0, k=1, key=None):
+        """Performs k Gibbs steps with explicit key handling."""
+        if key is None:
+            key = self.key
         vk = v0
         for _ in range(k):
-            h, _ = self.sample_h(vk)
-            vk, _ = self.sample_v(h)
-        return vk
+            # Let sample_h/sample_v handle key splitting internally
+            h, _, key = self.sample_h(vk, key)
+            vk, _, key = self.sample_v(h, key)
+        return vk, key
 
-    def train_batch(self, v0, learning_rate=0.01, k=1, l2_reg=0.0):
+    def train_batch(self, v0, learning_rate=0.01, k=1, l2_reg=0.0, key=None):
         """
         Updates the parameters of the RBM using Contrastive Divergence.
         
@@ -99,9 +99,12 @@ class GenerativeRBM:
           k (int): Number of Gibbs sampling steps.
           l2_reg (float): L2 regularization coefficient.
         """
-        vk = self.contrastive_divergence(v0, k)
-        h0, _ = self.sample_h(v0)
-        hk, _ = self.sample_h(vk)
+        if key is None: 
+            key = self.key
+        key, subkey = random.split(key) 
+        vk, key = self.contrastive_divergence(v0, k, subkey)
+        h0, _, key = self.sample_h(v0, key)
+        hk, _, key = self.sample_h(vk, key)
         batch_size = v0.shape[1]
         # Compute gradients (note: outer products are computed by dotting with the transpose).
         delta_W = jnp.dot(h0, v0.T) - jnp.dot(hk, vk.T)
@@ -111,13 +114,16 @@ class GenerativeRBM:
         self.W = self.W + learning_rate * (delta_W / batch_size - l2_reg * self.W)
         self.v_bias = self.v_bias + learning_rate * delta_v_bias / batch_size
         self.h_bias = self.h_bias + learning_rate * delta_h_bias / batch_size
-
-    def reconstruct(self, v, k=1):
+        self.key = key
+    
+    def reconstruct(self, v, k=1, key=None):
         """
         Reconstructs the input visible units by running Gibbs sampling.
         v is expected to have shape (n_visible, batch_size).
         """
-        return self.contrastive_divergence(v, k)
+        if key is None: 
+            key = self.key
+        return self.contrastive_divergence(v, k, key) # this returns a v_recon and a key
     
     def generate(self, n_samples, gibbs_steps=100, key=None):
         """Generate samples with explicit key management."""
@@ -129,14 +135,12 @@ class GenerativeRBM:
         
         # Gibbs sampling with explicit key passing
         for _ in range(gibbs_steps):
-            key, subkey = random.split(key)
-            h, _, key = self.sample_h(samples, subkey)
-            key, subkey = random.split(key)
-            samples, _, key = self.sample_v(h, subkey)
+            h, _, key = self.sample_h(samples, key) # these functions split the key inside and return 
+            samples, _, key = self.sample_v(h, key)
         
         return samples, key  # Return samples and updated key
 
-    def fit(self, epochs=10, batch_size=64, learning_rate=0.01, k=1, l2_reg=0.0, sample_number=1000):
+    def fit(self, epochs=10, batch_size=64, learning_rate=0.01, k=1, l2_reg=0.0, sample_number=1000, key=None):
         """
         Trains the RBM on the training data.
         
@@ -153,28 +157,67 @@ class GenerativeRBM:
           losses: A list of reconstruction losses per epoch.
           sample_list: An array containing generated samples at intervals.
         """
+
+        if key is None: 
+            key = self.key 
+
+        key, subkey = jax.random.split(key) 
         num_samples = self.X_train.shape[1]
         losses = []
         sample_list = []
         # Shuffle training data along the sample axis (columns).
-        permutation = np.random.permutation(num_samples)
+        permutation = jax.random.permutation(subkey, num_samples)
         X_train = self.X_train[:, permutation]
         for epoch in range(epochs):
+            key, subkey = random.split(key) 
             epoch_loss = 0.0
             for i in range(0, num_samples, batch_size):
                 batch = X_train[:, i:i+batch_size]
                 if batch.shape[1] != batch_size: 
                     continue 
-                self.train_batch_pcd(batch, learning_rate=learning_rate, k=k, l2_reg=l2_reg)
-                v_recon = self.reconstruct(batch)
+                key = self.train_batch_pcd(batch, learning_rate=learning_rate, k=k, l2_reg=l2_reg, key=subkey) # use it and return the key to advance state
+                v_recon, key = self.reconstruct(batch, key)  
                 epoch_loss += jnp.sum((batch - v_recon) ** 2)
             losses.append(epoch_loss)
             if (epoch * 10) % epochs == 0:
                 print(f"Epoch {epoch}/{epochs}, Reconstruction Loss: {epoch_loss:.4f}")
-                samples = self.generate(sample_number, gibbs_steps=1000)
+                samples, key = self.generate(sample_number, gibbs_steps=1000, key=key) # generate splits keys internally 
                 sample_list.append(samples)
         return losses, jnp.array(sample_list)
     
+    def train_batch_pcd(self, v0, learning_rate=0.01, k=1, l2_reg=0.0, key=None):
+        """
+        Updates the RBM parameters using Persistent Contrastive Divergence (PCD).
+        Instead of initializing the chain from the data v0 for the negative phase,
+        a persistent chain is maintained and updated.
+        
+        Parameters:
+          v0 (array): Batch of visible units with shape (n_visible, batch_size).
+          learning_rate (float): Learning rate.
+          k (int): Number of Gibbs steps to update the persistent chain.
+          l2_reg (float): L2 regularization coefficient.
+        """
+        if key is None:
+            key = self.key
+        # Positive phase
+        h0, _, key = self.sample_h(v0, key) # sample_h performs a split 
+        # Negative phase
+        vk, key = self.persistent_contrastive_divergence(k, batch_size=v0.shape[1], key=key)
+        hk, _, key = self.sample_h(vk, key)
+        
+        batch_size = v0.shape[1]
+        # Compute gradients using the difference between positive and negative phases.
+        delta_W = jnp.dot(h0, v0.T) - jnp.dot(hk, vk.T)
+        delta_v_bias = jnp.sum(v0 - vk, axis=1)
+        delta_h_bias = jnp.sum(h0 - hk, axis=1)
+        
+        # Update parameters with learning rate and optional L2 regularization.
+        self.W = self.W + learning_rate * (delta_W / batch_size - l2_reg * self.W)
+        self.v_bias = self.v_bias + learning_rate * delta_v_bias / batch_size
+        self.h_bias = self.h_bias + learning_rate * delta_h_bias / batch_size
+        self.key = key  # Update class key
+        return key
+
     def persistent_contrastive_divergence(self, k=1, batch_size=None, key=None):
         """Persistent chain with explicit key handling."""
         if key is None:
@@ -190,44 +233,12 @@ class GenerativeRBM:
         # Update chain with fresh keys
         chain = self.persistent_chain
         for _ in range(k):
-            key, subkey = random.split(key)
-            h, _, key = self.sample_h(chain, subkey)
-            key, subkey = random.split(key)
-            chain, _, key = self.sample_v(h, subkey)
+            h, _, key = self.sample_h(chain, key) # these methods split keys, so no need to split out here. 
+            chain, _, key = self.sample_v(h, key)
         
         self.persistent_chain = chain
         return chain, key
 
-    def train_batch_pcd(self, v0, learning_rate=0.01, k=1, l2_reg=0.0):
-        """
-        Updates the RBM parameters using Persistent Contrastive Divergence (PCD).
-        Instead of initializing the chain from the data v0 for the negative phase,
-        a persistent chain is maintained and updated.
-        
-        Parameters:
-          v0 (array): Batch of visible units with shape (n_visible, batch_size).
-          learning_rate (float): Learning rate.
-          k (int): Number of Gibbs steps to update the persistent chain.
-          l2_reg (float): L2 regularization coefficient.
-        """
-        # Positive phase: sample hidden units from the data.
-        h0, _ = self.sample_h(v0)
-        # Negative phase: update and retrieve fantasy samples from the persistent chain.
-        vk = self.persistent_contrastive_divergence(k, batch_size=v0.shape[1])
-        hk, _ = self.sample_h(vk)
-        
-        batch_size = v0.shape[1]
-        # Compute gradients using the difference between positive and negative phases.
-        delta_W = jnp.dot(h0, v0.T) - jnp.dot(hk, vk.T)
-        delta_v_bias = jnp.sum(v0 - vk, axis=1)
-        delta_h_bias = jnp.sum(h0 - hk, axis=1)
-        
-        # Update parameters with learning rate and optional L2 regularization.
-        self.W = self.W + learning_rate * (delta_W / batch_size - l2_reg * self.W)
-        self.v_bias = self.v_bias + learning_rate * delta_v_bias / batch_size
-        self.h_bias = self.h_bias + learning_rate * delta_h_bias / batch_size
-
-    
     @staticmethod
     def compute_averages(samples):
         """
