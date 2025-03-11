@@ -176,7 +176,7 @@ class GenerativeRBM:
                 if batch.shape[1] != batch_size: 
                     continue 
                 key = self.train_batch_pcd(batch, learning_rate=learning_rate, k=k, l2_reg=l2_reg, key=subkey) # use it and return the key to advance state
-                v_recon, key = self.reconstruct(batch, key)  
+                v_recon, key = self.reconstruct(batch, k, key)  
                 epoch_loss += jnp.sum((batch - v_recon) ** 2)
             losses.append(epoch_loss)
             if (epoch * 10) % epochs == 0:
