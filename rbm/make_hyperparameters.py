@@ -1,10 +1,10 @@
 import numpy as np
 import json 
 
-args = json.load(open('/n/home10/jfernandezdelcasti/noncanonical-olfaction/rbm/train_args.json', 'r'))
+args = json.load(open('/n/home10/jfernandezdelcasti/noncanonical-olfaction/rbm/hyperparameters.json', 'r'))
 
-args['epochs'] = 20
-args['batch_size'] = 10
+args['epochs'] = 2
+args['batch_size'] = 100
 args['sample_number'] = 1000
 args['n_hidden'] = 500
 
@@ -16,6 +16,6 @@ for i, reg in enumerate(l2_regs):
     args['l2_reg'] = reg
     for j, gamma in enumerate(gammas): 
         args['learning_rate'] = gamma 
-        with open(f'train_args/train_args_{k}.json', 'w') as out: 
+        with open(f'hyperparameters/hyperparameters_{k}.json', 'w') as out: 
             json.dump(args, out) 
             k += 1
