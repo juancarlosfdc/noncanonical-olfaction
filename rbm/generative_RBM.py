@@ -181,9 +181,9 @@ class GenerativeRBM:
             losses.append(epoch_loss)
             if (epoch * 10) % epochs == 0:
                 print(f"Epoch {epoch}/{epochs}, Reconstruction Loss: {epoch_loss:.4f}")
-                samples, key = self.generate(sample_number, gibbs_steps=1000, key=key) # generate splits keys internally 
+                samples, key = self.generate(sample_number, gibbs_steps=1000, key=key) # self.generate() splits keys internally 
                 sample_list.append(samples)
-        return losses, jnp.array(sample_list)
+        return losses, jnp.array(sample_list), key
     
     def train_batch_pcd(self, v0, learning_rate=0.01, k=1, l2_reg=0.0, key=None):
         """
@@ -254,23 +254,23 @@ class GenerativeRBM:
         sample_mean, cov = self.compute_averages(samples)
         return (sample_mean - self.mean)**2, (cov - self.cov)**2
 
-    def split_data_in_half(self):
+    def split_data_in_half(self, key):
         cols = self.data.shape[1]
-        perm = jax.random.permutation(self.key, cols)
+        perm = jax.random.permutation(key, cols)
         fh_indices = perm[:cols // 2]
         sh_indices = perm[-cols // 2:]
         first_half_data = self.data[:, fh_indices]
         second_half_data = self.data[:, sh_indices]
         return first_half_data, second_half_data
 
-    def background_model_squared_deviations(self):
-        first_half_data, second_half_data = self.split_data_in_half()
+    def background_model_squared_deviations(self, key):
+        first_half_data, second_half_data = self.split_data_in_half(key)
         fhm, fhc = self.compute_averages(first_half_data)
         shm, shc = self.compute_averages(second_half_data)
         return (fhm - shm)**2, (fhc - shc)**2
 
-    def compute_background_rmse(self):
-        mean_diffs, cov_diffs = self.background_model_squared_deviations()
+    def compute_background_rmse(self, key):
+        mean_diffs, cov_diffs = self.background_model_squared_deviations(key)
         return jnp.sqrt(jnp.mean(mean_diffs)), jnp.sqrt(jnp.mean(cov_diffs.flatten()))
 
     def compute_rmse(self, samples):
@@ -278,10 +278,10 @@ class GenerativeRBM:
         return jnp.sqrt(jnp.mean(mean_devs)), jnp.sqrt(jnp.mean(cov_devs.flatten()))
 
     def plot_deviations_over_time(self, train_args):
-        losses, samples = self.fit(**train_args)
+        losses, samples, key = self.fit(**train_args)
         fig, axs = plt.subplots(2, 1, height_ratios=[4, 1])
         errors = jnp.array(jax.vmap(self.compute_rmse)(samples)) 
-        background_mean, background_cov = self.compute_background_rmse()
+        background_mean, background_cov = self.compute_background_rmse(key)
         axs[0].scatter(range(errors.shape[1]), errors[0, :], label='means rmse (samples vs data)') 
         axs[0].hlines(background_mean, 0, errors.shape[1] - 1, ls='--', color='tab:blue', label='means rmse (data vs data)')
         axs[0].scatter(range(errors.shape[1]), errors[1, :], label='covs rmse (samples vs data)') 
