@@ -76,7 +76,7 @@ class GenerativeRBM:
     
     def initialize_v_bias(self):
         v_probs = jnp.sum(self.data, axis=1) / self.data.shape[1]
-        v_bias_init = jnp.log(v_probs / (1 - v_probs + 1e-6))
+        v_bias_init = jnp.log((v_probs + 1e-6) / (1 - (v_probs + 1e-6)))
         return v_bias_init
     
     def set_W_to_PCs(self): 
@@ -232,7 +232,6 @@ class GenerativeRBM:
             def gen_samples(key):
                 key, subkey = jax.random.split(key)
                 samples, key = self.generate(sample_number, W, v_bias, h_bias, gibbs_steps=1000, key=subkey)
-                jax.debug.print('epoch: {e}/{es} ====== reconstruction error: {re}', e=epoch, es = epochs, re=epoch_loss)
                 return key, samples
 
             def no_samples(key):
