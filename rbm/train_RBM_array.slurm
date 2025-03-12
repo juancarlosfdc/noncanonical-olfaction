@@ -2,13 +2,13 @@
 #SBATCH --job-name=train_RBM          # Job name
 #SBATCH --output=qtrain_RBM_%A_%a.out      # Standard output log (%A = array job ID, %a = array task ID)
 #SBATCH --error=qtrain_RBM_%A_%a.err       # Error log
-#SBATCH --partition=test           # Partition name
+#SBATCH --partition=sapphire           # Partition name
 #SBATCH --nodes=1                      # Request 1 node
 #SBATCH --ntasks=1                     # 1 task 
 #SBATCH --cpus-per-task=1           # Number of cores to allocate on the node
-#SBATCH --time=00:10:00                # Time limit (adjust as needed)
+#SBATCH --time=02:00:00                # Time limit (adjust as needed)
 #SBATCH --mem=2G                       # Memory per node (adjust as needed)
-#SBATCH --array=0-1                  # Create an array of 49 tasks (indices 0 through 12)
+#SBATCH --array=0-28                  # Create an array of 49 tasks (indices 0 through 12)
 
 
 # this script requires one command line argument: the path to a json file with all the parameters for training the rbm. 
