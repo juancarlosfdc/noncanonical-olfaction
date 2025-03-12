@@ -248,10 +248,15 @@ class GenerativeRBM:
         # Unpack results
         losses, samples = epoch_results
 
+        def drop_placeholder(samples): 
+            index = jnp.arange(epochs)
+            return samples[index * 10 % epochs == 0]
+        
+        non_zero_samples = drop_placeholder(samples) 
         # Create a new updated RBM state
         self.update(W=W, v_bias=v_bias, h_bias=h_bias, key=key, persistent_chain=persistent_chain)
 
-        return jnp.array(losses), samples, key
+        return jnp.array(losses), non_zero_samples, key
 
 
     @staticmethod
