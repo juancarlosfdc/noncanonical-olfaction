@@ -4,6 +4,9 @@ import sys
 import os 
 import json 
 import shutil 
+import jax
+
+print(jax.default_backend())
 
 # read arguments and copy training arguments into output directory 
 job_id = sys.argv[1] 
