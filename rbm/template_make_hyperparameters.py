@@ -3,9 +3,9 @@ import json
 
 args = json.load(open('/n/home10/jfernandezdelcasti/noncanonical-olfaction/rbm/hyperparameters.json', 'r'))
 
-args['epochs'] = 2
+args['epochs'] = 4
 args['batch_size'] = 100
-args['sample_number'] = 1000
+args['sample_number'] = 100
 args['n_hidden'] = 500
 
 l2_regs = np.logspace(-4, -1, 7) 

@@ -1,4 +1,4 @@
-from generative_RBM import GenerativeRBM
+from generative_RBM_jax import GenerativeRBM
 import jax.numpy as jnp
 import sys
 import os 
@@ -8,6 +8,7 @@ import shutil
 # read arguments and copy training arguments into output directory 
 job_id = sys.argv[1] 
 arg_dict_path = sys.argv[2]
+sweep_dir = sys.argv[3] 
 
 with open(arg_dict_path, 'r') as adp: 
     hyperparameters = json.load(adp)
@@ -18,7 +19,7 @@ lr = hyperparameters['learning_rate']
 lambda_exp = jnp.log10(reg) 
 lr_exp = jnp.log10(lr) 
 
-output_dir_name = f"epochs_200/lambda_{lambda_exp:.2f}_gamma_{lr_exp:.2f}"
+output_dir_name = f"{sweep_dir}/lambda_{lambda_exp:.2f}_gamma_{lr_exp:.2f}"
 os.makedirs(output_dir_name, exist_ok=True) 
 
 
@@ -27,7 +28,7 @@ parameter_path = os.path.join(output_dir_name, 'parameters.json')
 shutil.copy2(arg_dict_path, parameter_path) 
 
 # load rbm class and run the code 
-rbm = GenerativeRBM(n_hidden=hyperparameters['n_hidden'], digits=[5])
+rbm = GenerativeRBM(n_hidden=hyperparameters['n_hidden'], batch_size=hyperparameters['batch_size'], digits=[5])
 hyperparameters.pop('n_hidden') 
 
 fig, axs, samples, err = rbm.plot_deviations_over_time(hyperparameters)

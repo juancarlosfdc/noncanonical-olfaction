@@ -9,3 +9,6 @@ rbm/__pycache__/
 __pycache__/
 *.json
 *.csv
+rbm/*.slurm
+!rbm/template_train_RBM_array.slurm
+rbm/make_hyperparameters.py

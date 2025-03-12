@@ -24,5 +24,5 @@ mamba activate olfaction # oddly, you often have to activate the environment twi
 
 which python
 date 
-python -u train_RBM.py ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID} hyperparameters/hyperparameters_${SLURM_ARRAY_TASK_ID}.json
+python -u train_RBM.py ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID} hyperparameters/hyperparameters_${SLURM_ARRAY_TASK_ID}.json $1
 date 
