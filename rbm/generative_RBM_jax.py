@@ -243,6 +243,7 @@ class GenerativeRBM:
 
             return (W, v_bias, h_bias, key, persistent_chain), (epoch_loss, samples, W, v_bias, h_bias)
 
+        # no loop 
         # Scan over epochs
         (W, v_bias, h_bias, key, persistent_chain), epoch_results = jax.lax.scan(
             epoch_step, (self.W, self.v_bias, self.h_bias, key, self.persistent_chain), jnp.arange(epochs)
