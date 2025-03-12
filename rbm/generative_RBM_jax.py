@@ -78,6 +78,10 @@ class GenerativeRBM:
         v_probs = jnp.sum(self.data, axis=1) / self.data.shape[1]
         v_bias_init = jnp.log(v_probs / (1 - v_probs + 1e-6))
         return v_bias_init
+    
+    def set_W_to_PCs(self): 
+        _, evec = jnp.linalg.eig(self.data @ self.data.T)
+        self.W = jnp.real(evec[:, :self.n_hidden].T)
 
     def sigmoid(self, x):
         return 1.0 / (1.0 + jnp.exp(-x))
@@ -165,7 +169,7 @@ class GenerativeRBM:
         delta_h_bias = jnp.sum(h0 - hk, axis=1)
 
         new_W = W + learning_rate * (delta_W / batch_size - l2_reg * W)
-        new_v_bias = v_bias + learning_rate * delta_v_bias / batch_size
+        new_v_bias = v_bias + 0 * learning_rate * delta_v_bias / batch_size
         new_h_bias = h_bias + learning_rate * delta_h_bias / batch_size
 
         return new_W, new_v_bias, new_h_bias, key, vk
@@ -201,7 +205,6 @@ class GenerativeRBM:
         X_train = self.X_train[:, permutation]
         
         num_batches = num_samples // batch_size
-        batch_indices = jnp.arange(num_batches)
         batches = jnp.stack([X_train[:, i * batch_size:(i + 1) * batch_size] for i in range(num_batches)], axis=0)
 
         # Define batch step function for `lax.scan`
@@ -238,7 +241,7 @@ class GenerativeRBM:
                 (epoch * 10) % epochs == 0, gen_samples, no_samples, key
             )
 
-            return (W, v_bias, h_bias, key, persistent_chain), (epoch_loss, samples)
+            return (W, v_bias, h_bias, key, persistent_chain), (epoch_loss, samples, W, v_bias, h_bias)
 
         # Scan over epochs
         (W, v_bias, h_bias, key, persistent_chain), epoch_results = jax.lax.scan(
@@ -246,7 +249,7 @@ class GenerativeRBM:
         )
 
         # Unpack results
-        losses, samples = epoch_results
+        losses, samples, W, v_bias, h_bias = epoch_results
 
         def drop_placeholder(samples): 
             index = jnp.arange(epochs)
@@ -256,7 +259,7 @@ class GenerativeRBM:
         # Create a new updated RBM state
         self.update(W=W, v_bias=v_bias, h_bias=h_bias, key=key, persistent_chain=persistent_chain)
 
-        return jnp.array(losses), non_zero_samples, key
+        return jnp.array(losses), non_zero_samples, W, v_bias, h_bias, key
 
 
     @staticmethod
@@ -299,7 +302,7 @@ class GenerativeRBM:
         return jnp.sqrt(jnp.mean(mean_devs)), jnp.sqrt(jnp.mean(cov_devs.flatten()))
 
     def plot_deviations_over_time(self, train_args):
-        losses, samples, key = self.fit(**train_args)
+        losses, samples, W, v_bias, h_bias, key = self.fit(**train_args)
         fig, axs = plt.subplots(2, 1, height_ratios=[4, 1])
         errors = jnp.array(jax.vmap(self.compute_rmse)(samples)) 
         background_mean, background_cov = self.compute_background_rmse(key)
@@ -313,7 +316,7 @@ class GenerativeRBM:
         axs[1].set_xlabel('epoch') 
         axs[1].set_ylabel('reconstruction loss')
         axs[0].legend()
-        return fig, axs, samples, errors 
+        return fig, axs, samples, errors, W, v_bias, h_bias
     
     def plot_samples(self, samples, indices=None): 
         # samples is assumed to be timepoints x num_variables x num_samples. indices is a subset of range(len(timepoints)), so you can plot a subset if needed. 
