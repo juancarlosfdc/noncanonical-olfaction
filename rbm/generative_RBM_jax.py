@@ -233,24 +233,30 @@ class GenerativeRBM:
         if scan_updates: 
             (W, v_bias, h_bias, persistent_chain, key), epoch_results = jax.lax.scan(
                 epoch_step, (self.W, self.v_bias, self.h_bias, init_persistent_chain, key), jnp.arange(epochs)
-            )
+            )         
+            # Unpack results
+            losses, samples, Ws, v_biases, h_biases = epoch_results
         else: 
             # loop over epochs. For large numbers of epochs, this is essential, because scan will build a huge graph that eats memory
-            Ws = jnp.zeros(shape=(epochs, W.shape[0], W.shape[1]))
-            v_biases = jnp.zeros(shape=(epochs, self.v_bias.shape[0]))
-            h_biases = jnp.zeros(shape=(epochs, self.h_bias.shape[0]))
-            pcs = jnp.zeros(shape=(epochs, init_persistent_chain.shape[0], init_persistent_chain.shape[1]))
+            Ws, v_biases, h_biases, pcs, losses, samples = [], [], [], [], [], [] 
             W, v_bias, h_bias, persistent_chain = self.W, self.v_bias, self.h_bias, init_persistent_chain
-            for i, epoch in enumerate(epochs): 
+            for i, epoch in enumerate(range(epochs)):
                 key, subkey = jax.random.split(key) 
-                W, v_bias, h_bias, pc, key = epoch_step(W, v_bias, h_bias, persistent_chain, subkey) 
-                Ws[i] = W
-                v_biases[i] = v_bias 
-                h_biases[i] = h_bias
-                pcs[i] = pc
-            
-        # Unpack results
-        losses, samples, Ws, v_biases, h_biases = epoch_results
+                (W, v_bias, h_bias, pc, key), epoch_results = epoch_step((W, v_bias, h_bias, persistent_chain, subkey), epoch) 
+                loss, sample, _, _, _ = epoch_results
+                Ws.append(W) 
+                v_biases.append(v_bias) 
+                h_biases.append(h_bias) 
+                pcs.append(pc) 
+                losses.append(loss) 
+                samples.append(sample) 
+            Ws = jnp.stack(Ws, axis=0)
+            v_biases = jnp.stack(v_biases, axis=0)
+            h_biases = jnp.stack(h_biases, axis=0)
+            pcs = jnp.stack(pcs, axis=0)
+            losses = jnp.array(losses)
+            samples = jnp.stack(samples, axis=0) 
+
 
         def drop_placeholder(samples): 
             index = jnp.arange(epochs)
