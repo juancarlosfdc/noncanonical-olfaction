@@ -7,6 +7,7 @@ import shutil
 import jax
 
 print(jax.default_backend())
+jax.config.update("jax_default_matmul_precision", "high")  
 
 # read arguments and copy training arguments into output directory 
 job_id = sys.argv[1] 
@@ -34,7 +35,7 @@ shutil.copy2(arg_dict_path, parameter_path)
 rbm = GenerativeRBM(n_hidden=hyperparameters['n_hidden'], batch_size=hyperparameters['batch_size'], digits=[5])
 hyperparameters.pop('n_hidden') 
 
-fig, axs, samples, err = rbm.plot_deviations_over_time(hyperparameters)
+fig, axs, samples, err, W, v_bias, h_bias = rbm.plot_deviations_over_time(hyperparameters)
 
 # create output paths and write outputs 
 deviation_numpy_path = os.path.join(output_dir_name, 'moment_deviations') 
