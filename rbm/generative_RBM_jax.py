@@ -219,6 +219,7 @@ class GenerativeRBM:
             def gen_samples(key):
                 key, subkey = jax.random.split(key)
                 samples, key = self.generate(subkey, sample_number, W, v_bias, h_bias, gibbs_steps=1000)
+                jax.debug.print("epoch: {e} reconstruction error: {r}", e=epoch, r=epoch_loss)
                 return key, samples
 
             def no_samples(key):
