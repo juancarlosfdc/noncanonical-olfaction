@@ -40,7 +40,7 @@ rbm = GenerativeRBM(key=hyperparameters['key'],
 
 hyperparameters.pop('n_hidden') 
 hyperparameters.pop('random_seed')
-fig, axs, samples, err = rbm.plot_deviations_over_time(hyperparameters)
+fig, axs, samples, err = rbm.plot_deviations_over_time(output_dir_name, hyperparameters)
 
 # create output paths and write outputs 
 deviation_numpy_path = os.path.join(output_dir_name, 'moment_deviations') 

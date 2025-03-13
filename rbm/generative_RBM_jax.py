@@ -165,7 +165,7 @@ class GenerativeRBM:
     def update(self, W, v_bias, h_bias, persistent_chain):
         self.W, self.v_bias, self.h_bias, self.persistent_chain = W, v_bias, h_bias, persistent_chain
 
-    def fit(self, key, scans=1, epochs_per_scan=10, batch_size=64, learning_rate=0.01, k=1, 
+    def fit(self, key, output_dir, scans=1, epochs_per_scan=10, batch_size=64, learning_rate=0.01, k=1, 
         l2_reg=0.0, sample_number=1000):
         """
         Trains the RBM on the training data using jax.lax.scan for the loops.
@@ -219,9 +219,9 @@ class GenerativeRBM:
             epoch_loss = jnp.sum(batch_losses)
 
             def write_samples(samples, epoch):
-                if not os.path.isdir('samples'): 
-                    os.mkdir('samples')
-                jnp.save(f'samples/samples_{epoch}', samples)
+                if not os.path.isdir(f'{output_dir}/samples'): 
+                    os.mkdir(f'{output_dir}/samples')
+                jnp.save(f'{output_dir}/samples/samples_{epoch}', samples)
 
             # optionally write samples every few epochs. 
             def gen_samples(key):
@@ -300,8 +300,8 @@ class GenerativeRBM:
         mean_devs, cov_devs = self.compute_squared_deviations(samples)
         return jnp.sqrt(jnp.mean(mean_devs)), jnp.sqrt(jnp.mean(cov_devs.flatten()))
 
-    def read_samples(self): 
-        files = glob.glob('samples/*.npy')
+    def read_samples(self, output_dir): 
+        files = glob.glob(f'{output_dir}/samples/*.npy')
         files_sorted = sorted(files, key=lambda x: int(re.findall(r'samples_(\d+)\.npy', x)[0]))
         # Read each file and store in a list
         samples_list = [jnp.load(f) for f in files_sorted]
@@ -309,11 +309,9 @@ class GenerativeRBM:
         concatenated_samples = jnp.stack(samples_list)
         return concatenated_samples
     
-    def plot_deviations_over_time(self, train_args):
-        # first: delete any existing samples 
-        [os.remove(f) for f in glob.glob('samples/*')]
-        losses, key = self.fit(**train_args)
-        samples = self.read_samples()
+    def plot_deviations_over_time(self, output_dir, train_args):
+        losses, key = self.fit(output_dir=output_dir, **train_args)
+        samples = self.read_samples(output_dir)
         fig, axs = plt.subplots(2, 1, height_ratios=[4, 1])
         errors = jnp.array(jax.vmap(self.compute_rmse)(samples)) 
         key, subkey = jax.random.split(key) 
