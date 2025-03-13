@@ -5,6 +5,7 @@ import os
 import json 
 import shutil 
 import jax
+import glob 
 
 print(jax.default_backend())
 jax.config.update("jax_default_matmul_precision", "high")  
@@ -40,6 +41,10 @@ rbm = GenerativeRBM(key=hyperparameters['key'],
 
 hyperparameters.pop('n_hidden') 
 hyperparameters.pop('random_seed')
+
+# clear samples directory: 
+sample_files = glob.glob(f'{output_dir_name}/samples/*')
+[os.remove(sf) for sf in sample_files]
 fig, axs, samples, err = rbm.plot_deviations_over_time(output_dir_name, hyperparameters)
 
 # create output paths and write outputs 
