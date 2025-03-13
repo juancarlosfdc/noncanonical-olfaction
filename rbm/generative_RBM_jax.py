@@ -8,6 +8,7 @@ from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 import pandas as pd
 from functools import partial
+from jax.experimental import io_callback 
 
 class GenerativeRBM:
     def __init__(self, key, n_hidden, batch_size=64, data_path=None, W_scale=0.01, digits=None):
@@ -117,7 +118,6 @@ class GenerativeRBM:
 
         return final_samples, key  # Return final samples and updated key
 
-
     def contrastive_divergence(self, key, v0, W, h_bias, v_bias, k=1):
         def body_fn(carry, _):
             vk, key = carry
@@ -202,7 +202,7 @@ class GenerativeRBM:
             v_recon, key = self.contrastive_divergence(key, batch, W, h_bias, v_bias, k)
             loss = jnp.sum((batch - v_recon) ** 2)
             return (W, v_bias, h_bias, persistent_chain, key), loss
-
+        
         # Define epoch step function for `lax.scan`
         def epoch_step(carry, epoch):
             W, v_bias, h_bias, persistent_chain, key = carry
@@ -215,28 +215,29 @@ class GenerativeRBM:
             )
             epoch_loss = jnp.sum(batch_losses)
 
-            # Optionally generate samples every few epochs
+            def write_samples(samples, epoch):
+                jnp.save(f'samples_{epoch}', samples)
+
+            # optionally write samples every few epochs. 
             def gen_samples(key):
                 key, subkey = jax.random.split(key)
                 samples, key = self.generate(subkey, sample_number, W, v_bias, h_bias, gibbs_steps=1000)
+                io_callback(write_samples, None, samples, scan * epochs_per_scan + epoch)
                 jax.debug.print("epoch: {e} reconstruction error: {r}", e=epoch, r=epoch_loss)
-                return key, samples
+                return key 
 
-            def no_samples(key):
-                return key, jnp.zeros((self.n_visible, sample_number))
-
-            key, samples = jax.lax.cond(
-                (epoch * 10) % epochs == 0, gen_samples, no_samples, key
+            key = jax.lax.cond(
+                (epoch * 10) % epochs == 0, gen_samples, lambda x: x, key
             )
 
-            return (W, v_bias, h_bias, persistent_chain, key), (epoch_loss, samples)
+            return (W, v_bias, h_bias, persistent_chain, key), (epoch_loss)
 
         # there are two options. we can loop over epochs (slow but low mem), scan over epochs (fast but high mem). 
 
         # the third answer: loop over scans! That's fast and tolerable mem. 
 
         current_state = (self.W, self.v_bias, self.h_bias, init_persistent_chain, key)
-        losses_list, samples_list = [], []
+        losses_list = []
 
         for scan in range(scans): 
             # Run a scan for scan_length epochs
@@ -244,23 +245,16 @@ class GenerativeRBM:
                 epoch_step, current_state, scan * epochs_per_scan + jnp.arange(epochs_per_scan)
             )
             # Unpack epoch_results: each epoch_step returns (loss, sample, W, v_bias, h_bias)
-            losses, samples = epoch_results
+            losses =  epoch_results
             losses_list.append(losses)
-            samples_list.append(samples)
 
         losses = jnp.concatenate(losses_list, axis=0)
-        samples = jnp.concatenate(samples_list, axis=0)
 
-        def drop_placeholder(samples): 
-            index = jnp.arange(epochs)
-            return samples[index * 10 % epochs == 0]
-        
-        non_zero_samples = drop_placeholder(samples) 
         # Create a new updated RBM state
         W, v_bias, h_bias, persistent_chain, key = current_state
         self.update(W=W, v_bias=v_bias, h_bias=h_bias, persistent_chain=persistent_chain)
 
-        return jnp.array(losses), non_zero_samples, key
+        return jnp.array(losses), key
 
 
     @staticmethod
