@@ -219,6 +219,8 @@ class GenerativeRBM:
             epoch_loss = jnp.sum(batch_losses)
 
             def write_samples(samples, epoch):
+                if not os.path.isdir('samples'): 
+                    os.mkdir('samples')
                 jnp.save(f'samples/samples_{epoch}', samples)
 
             # optionally write samples every few epochs. 
@@ -303,7 +305,7 @@ class GenerativeRBM:
         files_sorted = sorted(files, key=lambda x: int(re.findall(r'samples_(\d+)\.npy', x)[0]))
         # Read each file and store in a list
         samples_list = [jnp.load(f) for f in files_sorted]
-        print(files_sorted) 
+        print('reading sample files:', files_sorted) 
         concatenated_samples = jnp.stack(samples_list)
         return concatenated_samples
     
