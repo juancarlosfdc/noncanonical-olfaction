@@ -162,8 +162,8 @@ class GenerativeRBM:
     def update(self, W, v_bias, h_bias, persistent_chain):
         self.W, self.v_bias, self.h_bias, self.persistent_chain = W, v_bias, h_bias, persistent_chain
 
-    def fit(self, key, epochs=10, batch_size=64, learning_rate=0.01, k=1, 
-        l2_reg=0.0, sample_number=1000, scan_updates=True):
+    def fit(self, key, scans=1, epochs_per_scan=10, batch_size=64, learning_rate=0.01, k=1, 
+        l2_reg=0.0, sample_number=1000):
         """
         Trains the RBM on the training data using jax.lax.scan for the loops.
 
@@ -190,6 +190,8 @@ class GenerativeRBM:
         
         num_batches = num_samples // batch_size
         batches = jnp.stack([X_train[:, i * batch_size:(i + 1) * batch_size] for i in range(num_batches)], axis=0)
+
+        epochs = epochs_per_scan * scans
 
         # Define batch step function for `lax.scan`
         def batch_step(carry, batch):
@@ -228,35 +230,31 @@ class GenerativeRBM:
 
             return (W, v_bias, h_bias, persistent_chain, key), (epoch_loss, samples, W, v_bias, h_bias)
 
-        # no loop
-        # Scan over epochs
-        if scan_updates: 
-            (W, v_bias, h_bias, persistent_chain, key), epoch_results = jax.lax.scan(
-                epoch_step, (self.W, self.v_bias, self.h_bias, init_persistent_chain, key), jnp.arange(epochs)
-            )         
-            # Unpack results
-            losses, samples, Ws, v_biases, h_biases = epoch_results
-        else: 
-            # loop over epochs. For large numbers of epochs, this is essential, because scan will build a huge graph that eats memory
-            Ws, v_biases, h_biases, pcs, losses, samples = [], [], [], [], [], [] 
-            W, v_bias, h_bias, persistent_chain = self.W, self.v_bias, self.h_bias, init_persistent_chain
-            for i, epoch in enumerate(range(epochs)):
-                key, subkey = jax.random.split(key) 
-                (W, v_bias, h_bias, pc, key), epoch_results = epoch_step((W, v_bias, h_bias, persistent_chain, subkey), epoch) 
-                loss, sample, _, _, _ = epoch_results
-                Ws.append(W) 
-                v_biases.append(v_bias) 
-                h_biases.append(h_bias) 
-                pcs.append(pc) 
-                losses.append(loss) 
-                samples.append(sample) 
-            Ws = jnp.stack(Ws, axis=0)
-            v_biases = jnp.stack(v_biases, axis=0)
-            h_biases = jnp.stack(h_biases, axis=0)
-            pcs = jnp.stack(pcs, axis=0)
-            losses = jnp.array(losses)
-            samples = jnp.stack(samples, axis=0) 
+        # there are two options. we can loop over epochs (slow but low mem), scan over epochs (fast but high mem). 
 
+        # the third answer: loop over scans! That's fast and tolerable mem. 
+
+        current_state = (self.W, self.v_bias, self.h_bias, init_persistent_chain, key)
+        Ws_list, v_biases_list, h_biases_list, losses_list, samples_list = [], [], [], [], [] 
+
+        for scan in range(scans): 
+            # Run a scan for scan_length epochs
+            current_state, epoch_results = jax.lax.scan(
+                epoch_step, current_state, jnp.arange(epochs_per_scan)
+            )
+            # Unpack epoch_results: each epoch_step returns (loss, sample, W, v_bias, h_bias)
+            losses, samples, Ws, v_biases, h_biases = epoch_results
+            Ws_list.append(Ws)
+            v_biases_list.append(v_biases)
+            h_biases_list.append(h_biases)
+            losses_list.append(losses)
+            samples_list.append(samples)
+
+        Ws = jnp.concatenate(Ws_list, axis=0)
+        v_biases = jnp.concatenate(v_biases_list, axis=0)
+        h_biases = jnp.concatenate(h_biases_list, axis=0)
+        losses = jnp.concatenate(losses_list, axis=0)
+        samples = jnp.concatenate(samples_list, axis=0)
 
         def drop_placeholder(samples): 
             index = jnp.arange(epochs)
@@ -264,6 +262,7 @@ class GenerativeRBM:
         
         non_zero_samples = drop_placeholder(samples) 
         # Create a new updated RBM state
+        W, v_bias, h_bias, persistent_chain, key = current_state
         self.update(W=W, v_bias=v_bias, h_bias=h_bias, persistent_chain=persistent_chain)
 
         return jnp.array(losses), non_zero_samples, Ws, v_biases, h_biases, key
