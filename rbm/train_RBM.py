@@ -32,9 +32,14 @@ parameter_path = os.path.join(output_dir_name, 'parameters.json')
 shutil.copy2(arg_dict_path, parameter_path) 
 
 # load rbm class and run the code 
-rbm = GenerativeRBM(n_hidden=hyperparameters['n_hidden'], batch_size=hyperparameters['batch_size'], digits=[5])
-hyperparameters.pop('n_hidden') 
+hyperparameters['key'] = jax.random.PRNGKey(hyperparameters['random_seed'])
+rbm = GenerativeRBM(key=hyperparameters['key'], 
+                    n_hidden=hyperparameters['n_hidden'], 
+                    batch_size=hyperparameters['batch_size'], 
+                    digits=[5])
 
+hyperparameters.pop('n_hidden') 
+hyperparameters.pop('random_seed')
 fig, axs, samples, err, W, v_bias, h_bias = rbm.plot_deviations_over_time(hyperparameters)
 
 # create output paths and write outputs 
@@ -54,7 +59,8 @@ fig.savefig(deviation_png_path)
 samples_numpy_path = os.path.join(output_dir_name, 'samples') 
 samples_png_path = os.path.join(output_dir_name, 'samples.png') 
 
-fig, ax = rbm.plot_samples(samples) 
+key, subkey = jax.random.split(hyperparameters['key'])
+fig, ax = rbm.plot_samples(subkey, samples) 
 
 fig.suptitle(rf'$10^{{{exp:.2f}}}$', size=40) 
 
