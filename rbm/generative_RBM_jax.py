@@ -9,6 +9,9 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 from functools import partial
 from jax.experimental import io_callback 
+import os 
+import re 
+import glob
 
 class GenerativeRBM:
     def __init__(self, key, n_hidden, batch_size=64, data_path=None, W_scale=0.01, digits=None):
@@ -216,7 +219,7 @@ class GenerativeRBM:
             epoch_loss = jnp.sum(batch_losses)
 
             def write_samples(samples, epoch):
-                jnp.save(f'samples_{epoch}', samples)
+                jnp.save(f'samples/samples_{epoch}', samples)
 
             # optionally write samples every few epochs. 
             def gen_samples(key):
@@ -255,7 +258,6 @@ class GenerativeRBM:
         self.update(W=W, v_bias=v_bias, h_bias=h_bias, persistent_chain=persistent_chain)
 
         return jnp.array(losses), key
-
 
     @staticmethod
     @jit 
@@ -296,8 +298,20 @@ class GenerativeRBM:
         mean_devs, cov_devs = self.compute_squared_deviations(samples)
         return jnp.sqrt(jnp.mean(mean_devs)), jnp.sqrt(jnp.mean(cov_devs.flatten()))
 
+    def read_samples(self): 
+        files = glob.glob('samples/*.npy')
+        files_sorted = sorted(files, key=lambda x: int(re.findall(r'samples_(\d+)\.npy', x)[0]))
+        # Read each file and store in a list
+        samples_list = [jnp.load(f) for f in files_sorted]
+        print(files_sorted) 
+        concatenated_samples = jnp.stack(samples_list)
+        return concatenated_samples
+    
     def plot_deviations_over_time(self, train_args):
-        losses, samples, key = self.fit(**train_args)
+        # first: delete any existing samples 
+        [os.remove(f) for f in glob.glob('samples/*')]
+        losses, key = self.fit(**train_args)
+        samples = self.read_samples()
         fig, axs = plt.subplots(2, 1, height_ratios=[4, 1])
         errors = jnp.array(jax.vmap(self.compute_rmse)(samples)) 
         key, subkey = jax.random.split(key) 
