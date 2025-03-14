@@ -40,11 +40,11 @@ class GenerativeRBM:
             if digits is not None: 
                 data = mnist.data[mnist.target.isin([str(d) for d in digits])] 
             # Original shape is (n_samples, n_features). Transpose to have shape (n_features, n_samples).
-            X = np.array(data.T, dtype=np.float32) / 255.0  # Normalize to [0,1]
+            X = jnp.array(data.T, dtype=np.float32) / 255.0  # Normalize to [0,1]
             print("Data shape:", X.shape)
             X = (X > 0.5).astype(np.float32)  # Binarize the data
         else:
-            X = pd.read_csv(data_path, index_col=0).values
+            X = jnp.array(pd.read_csv(data_path, index_col=0).values, dtype=jnp.float32) 
         return X
 
     def _tree_flatten(self):
@@ -249,7 +249,7 @@ class GenerativeRBM:
             current_state, epoch_results = jax.lax.scan(
                 epoch_step, current_state, scan * epochs_per_scan + jnp.arange(epochs_per_scan)
             )
-            # Unpack epoch_results: each epoch_step returns (loss, sample, W, v_bias, h_bias)
+            # Unpack epoch results: this is the second tuple returned by epoch_step. 
             losses =  epoch_results
             losses_list.append(losses)
 
@@ -310,6 +310,9 @@ class GenerativeRBM:
         return concatenated_samples
     
     def plot_deviations_over_time(self, output_dir, train_args):
+        current_samples = glob.glob(f'{output_dir}/samples/*')
+        for cs in current_samples: 
+            os.remove(cs) 
         losses, key = self.fit(output_dir=output_dir, **train_args)
         samples = self.read_samples(output_dir)
         fig, axs = plt.subplots(2, 1, height_ratios=[4, 1])
