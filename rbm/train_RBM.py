@@ -15,6 +15,11 @@ job_id = sys.argv[1]
 arg_dict_path = sys.argv[2]
 sweep_dir = sys.argv[3] 
 
+# Add command line switch for saving weights; default is False.
+save_weights = False
+if len(sys.argv) > 4:
+    save_weights = sys.argv[4].lower() in ('true', '1')
+
 with open(arg_dict_path, 'r') as adp: 
     hyperparameters = json.load(adp)
 
@@ -46,6 +51,15 @@ hyperparameters.pop('random_seed')
 sample_files = glob.glob(f'{output_dir_name}/samples/*')
 [os.remove(sf) for sf in sample_files]
 fig, axs, samples, err = rbm.plot_deviations_over_time(output_dir_name, hyperparameters)
+
+if save_weights:
+    weights_path = os.path.join(output_dir_name, 'W.npy')
+    v_bias_path = os.path.join(output_dir_name, 'v_bias.npy')
+    h_bias_path = os.path.join(output_dir_name, 'h_bias.npy')
+    jnp.save(weights_path, rbm.W)
+    jnp.save(v_bias_path, rbm.v_bias)
+    jnp.save(h_bias_path, rbm.h_bias)
+    print(f"RBM weights saved to {weights_path}")
 
 # create output paths and write outputs 
 deviation_numpy_path = os.path.join(output_dir_name, 'moment_deviations') 
