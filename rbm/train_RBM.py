@@ -37,7 +37,7 @@ hyperparameters['key'] = jax.random.PRNGKey(hyperparameters['random_seed'])
 rbm = GenerativeRBM(key=hyperparameters['key'], 
                     n_hidden=hyperparameters['n_hidden'], 
                     batch_size=hyperparameters['batch_size'], 
-                    digits=[5])
+                    data_path='../Matrix2_filtered_and_downsampled_18March2025.csv')
 
 hyperparameters.pop('n_hidden') 
 hyperparameters.pop('random_seed')
@@ -61,13 +61,13 @@ fig.suptitle(rf'$10^{{{exp:.2f}}}$', size=20)
 fig.savefig(deviation_png_path) 
 
 # make samples output paths
-samples_numpy_path = os.path.join(output_dir_name, 'samples') 
-samples_png_path = os.path.join(output_dir_name, 'samples.png') 
+# samples_numpy_path = os.path.join(output_dir_name, 'samples') 
+# samples_png_path = os.path.join(output_dir_name, 'samples.png') 
 
-key, subkey = jax.random.split(hyperparameters['key'])
-fig, ax = rbm.plot_samples(subkey, samples) 
+# key, subkey = jax.random.split(hyperparameters['key'])
+# fig, ax = rbm.plot_samples(subkey, samples) 
 
-fig.suptitle(rf'$10^{{{exp:.2f}}}$', size=40) 
+# fig.suptitle(rf'$10^{{{exp:.2f}}}$', size=40) 
 
-jnp.save(samples_numpy_path, samples) 
-fig.savefig(samples_png_path)  
+# jnp.save(samples_numpy_path, samples) 
+# fig.savefig(samples_png_path)  
