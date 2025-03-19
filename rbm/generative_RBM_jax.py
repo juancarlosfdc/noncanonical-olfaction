@@ -223,11 +223,19 @@ class GenerativeRBM:
                     os.mkdir(f'{output_dir}/samples')
                 jnp.save(f'{output_dir}/samples/samples_{epoch}', samples)
 
+            def save_weights(W, v_bias, h_bias, epoch):
+                if not os.path.isdir(f'{output_dir}/weights'): 
+                    os.mkdir(f'{output_dir}/weights')
+                jnp.save(f'{output_dir}/weights/W_{epoch}', W)
+                jnp.save(f'{output_dir}/weights/v_bias_{epoch}', v_bias)
+                jnp.save(f'{output_dir}/weights/h_bias_{epoch}', h_bias)
+
             # optionally write samples every few epochs. 
             def gen_samples(key):
                 key, subkey = jax.random.split(key)
                 samples, key = self.generate(subkey, sample_number, W, v_bias, h_bias, gibbs_steps=1000)
                 io_callback(write_samples, None, samples, scan * epochs_per_scan + epoch)
+                io_callback(save_weights, None, W, v_bias, h_bias, epoch)
                 jax.debug.print("epoch: {e} reconstruction error: {r}", e=epoch, r=epoch_loss)
                 return key 
 
