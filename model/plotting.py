@@ -68,3 +68,28 @@ def plot_expression(E_init, E_final, mis):
     ax23.set_yticks([])
     ax23.set_title(r"$\log(\text{expression ratio})$", loc='right')
     return fig, axs 
+
+
+# for example: 
+
+''' 
+key = jax.random.key(0)
+phi, psi = phi_simplex, psi_simplex
+scans, epochs_per_scan = 2, 2000
+init_state, hp, gammas = initialize_model(key, scans=scans, epochs_per_scan=epochs_per_scan) 
+
+state, metrics = train_natural_gradient_scan_over_epochs(init_state, hp, phi, psi, gammas, None, scans, epochs_per_scan)
+
+# then plot 
+
+fig, axs = plot_expression(init_state.p.E, state.p.E,  metrics['mi'])
+fig.savefig('tmp.png')
+
+axs['E_init'].imshow
+
+plt.imshow(state.p.E, aspect='auto') 
+
+fig, axs, r_init, r_final = plot_activity(p_init, state.p, hp, -1 * metrics['mi'], key=jax.random.key(0)) 
+fig.suptitle(r'$\phi_1(r)^T \phi_2(c)$', y=1.05)
+fig.savefig('tmp.png', bbox_inches='tight')
+'''
