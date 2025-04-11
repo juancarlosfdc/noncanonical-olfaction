@@ -1,0 +1,32 @@
+{
+  "hyperparams": {
+    "N": 100,
+    "n": 2,
+    "M": 2,
+    "L": 2,
+    "P": 1000,
+    "window": 32,
+    "sigma_0": 0.01,
+    "sigma_c": 2.0,
+    "W_scale": 0.1,
+    "nonlinearity": "sigmoid log",
+    "F_max": 25.0,
+    "hill_exponent": 4,
+    "odor_model": "log normal",
+    "activity_model": "linear filter",
+    "loss": "jensen_shannon_loss",
+    "phi": "softplus_phi",
+    "psi": "softplus_psi"
+  },
+  "training": {
+      "scans": 2,
+      "epochs_per_scan": 1000,
+      "gamma_p": 0.1,
+      "gamma_T": 0.1
+  },
+  "logging": {
+    "log_interval": 10,
+    "save_model": true,
+    "output_dir": "./results/"
+  }
+}
