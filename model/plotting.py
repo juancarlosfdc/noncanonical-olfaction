@@ -1,4 +1,8 @@
 import matplotlib.pyplot as plt
+from model import * 
+import jax 
+import jax.numpy as jnp
+from jax import vmap 
 
 def plot_expression(E_init, E_final, mis): 
     fig, axs = plt.subplots(1, 2, figsize=(12, 5))
@@ -25,17 +29,35 @@ def plot_activity(p_init, p_final, hp, mis, key):
     axs[0].set_ylabel(r'$E_{i, 2}$')
     axs[0].legend()
     axs[0].set_title('E_i')
+    axs[0].plot([0, 1], [1, 0], color='black')
     key, *subkeys = jax.random.split(key, 4) 
-    cs = draw_cs_sparse_log_normal(subkeys[0], hp)
-    r_init = compute_linear_filter_activity(subkeys[1], hp, p_init, cs)
-    r_final = compute_linear_filter_activity(subkeys[2], hp, p_final, cs)
-    axs[1].scatter(r_init[0], r_init[1], alpha=0.7, label='r_init')
-    axs[1].scatter(r_final[0], r_final[1], alpha=0.7, label='r_final')
+    draw_cs = ODOR_MODEL_REGISTRY[hp.odor_model]
+    activity_function = ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
+    cs = draw_cs(subkeys[0], hp)
+    r_init = activity_function(hp, p_init, cs, subkeys[1])
+    r_final = activity_function(hp, p_final, cs, subkeys[2])
+    if r_init.shape[0] == 1:
+        axs[1].hist(r_init[0], alpha=0.7, label='r_init')
+        axs[1].hist(r_final[0], alpha=0.7, label='r_final')
+    else: 
+        axs[1].scatter(r_init[0], r_init[1], alpha=0.7, label='r_init')
+        axs[1].scatter(r_final[0], r_final[1], alpha=0.7, label='r_final')
+        axs[1].set_ylabel(r'$r_2$', labelpad=1)
     axs[1].legend()
     axs[1].set_title('neural activity') 
+    axs[1].set_xlabel(r'$r_1$')
     axs[2].plot(mis) 
     axs[2].set_title(r'$\widehat{MI_{JSD}}(r; c)$')
+    axs[2].set_xlabel('training step')
     return fig, axs, r_init, r_final 
+
+# example call: 
+'''
+key = jax.random.key(42) 
+fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics['mi'], key) 
+fig.suptitle(f'{hp.activity_model} activity, {hp.odor_model} odor model', y=1.05)
+fig.savefig('tmp.png', bbox_inches='tight')
+'''
 
 def compute_expression_ratio_neuron(e): 
     se = jnp.sort(e) 
@@ -70,26 +92,8 @@ def plot_expression(E_init, E_final, mis):
     return fig, axs 
 
 
-# for example: 
-
-''' 
-key = jax.random.key(0)
-phi, psi = phi_simplex, psi_simplex
-scans, epochs_per_scan = 2, 2000
-init_state, hp, gammas = initialize_model(key, scans=scans, epochs_per_scan=epochs_per_scan) 
-
-state, metrics = train_natural_gradient_scan_over_epochs(init_state, hp, phi, psi, gammas, None, scans, epochs_per_scan)
-
-# then plot 
-
+# example call: 
+'''
 fig, axs = plot_expression(init_state.p.E, state.p.E,  metrics['mi'])
 fig.savefig('tmp.png')
-
-axs['E_init'].imshow
-
-plt.imshow(state.p.E, aspect='auto') 
-
-fig, axs, r_init, r_final = plot_activity(p_init, state.p, hp, -1 * metrics['mi'], key=jax.random.key(0)) 
-fig.suptitle(r'$\phi_1(r)^T \phi_2(c)$', y=1.05)
-fig.savefig('tmp.png', bbox_inches='tight')
 '''

@@ -2,6 +2,8 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np 
+import flax.linen as nn 
+import jax.tree_util as jtu    
 from jax import vmap, lax, jit 
 from jax.scipy.stats import norm, rankdata
 from jax.scipy.special import digamma
@@ -9,37 +11,47 @@ from jax.scipy.special import gamma
 from jax.scipy.linalg import cholesky
 from functools import partial
 from typing import NamedTuple
-from flax import struct 
-import flax.linen as nn 
+from flax import struct
 
 plt.rcParams['font.size'] = 20
-
-def sigmoid_log(x): 
-    return x / (x + 1) 
-
-NL_REGISTRY = {
-    'sigmoid_log': sigmoid_log,
-    'relu': jax.nn.relu,
-    'tanh': jax.nn.tanh,
-    'id': lambda x : x
-}
+DATA_PATH = '/Users/juancarlos/noncanonical-olfaction/rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy'
 
 class HyperParams(NamedTuple):
-    N: int = 100 # number of odorants 
+    N: int = 100 # number of odorants. this needs to match the number of variables (rows) in the data when using the data driven model. 
     n: int = 2 # sparsity of odor vectors--only applies for the Qin et al 2019 odor model 
     M: int = 30 # number of odorant receptors
-    O: int = 300 # number of olfactory receptor neurons 
+    L: int = 300 # number of olfactory receptor neurons 
     P: int = 1000 # number of samples when we compute MI
     window: int = 32 # this should be set to jnp.round(jnp.sqrt(P) + 0.5).astype(int) but doing this dynamically makes hp not hashable. So change it when you change P!
-
     sigma_0: float = 0.01 # neural noise in Gaussian linear filter model 
     sigma_c: float = 2.0 # std_dev of log normal Qin et al 2019 odorant model 
-
-    nonlinearity: str = 'sigmoid_log'
-
+    W_scale: float = 0.1
+    nonlinearity: str = 'sigmoid log'
     F_max: float = 25.0
-    n: int = 4
-    
+    hill_exponent: int = 4
+    odor_model: str = 'log normal'
+    activity_model: str = 'linear filter'
+    loss: str = 'jensen_shannon_loss'
+    phi: str = 'softplus_phi'
+    psi: str = 'softplus_psi'
+
+class TrainingConfig(NamedTuple):
+    scans: int = 10
+    epochs_per_scan: int = 100
+    gamma_p: float = 0.1
+    gamma_T: float = 0.1
+
+class LoggingConfig(NamedTuple):
+    log_interval: int = None 
+    save_model: bool = False
+    output_dir: str = '.' 
+
+class FullConfig(NamedTuple):
+    hyperparams: HyperParams
+    training: TrainingConfig
+    logging: LoggingConfig
+    seed: int = 0
+
 @struct.dataclass
 class Params: 
     W: jnp.ndarray
@@ -70,7 +82,7 @@ class T_estimator(nn.Module):
 
     # @nn.compact     
     # def __call__(self, c, r):
-    #     # Concatenate c (P, N) and r (P, O) -> (P, N + O)
+    #     # Concatenate c (P, N) and r (P, L) -> (P, N + L)
     #     x = jnp.concatenate([c, r], axis=1)
     #     x = nn.Dense(self.hidden_dim)(x)
     #     x = nn.relu(x) 
@@ -86,17 +98,62 @@ class TrainingState:
     key: jax.Array   # PRNG key
     metrics: dict 
 
-def init_hp_and_p(rng, scale=1, hp=None, sigma_kappa_inv=4.0, rho=0) -> Params: 
+def create_one_hot_array(key, L, M):
+    indices = jax.random.randint(key, (L,), 0, M)
+    return jax.nn.one_hot(indices, M, dtype=jnp.int32)
+
+def sigmoid_log(x): 
+    return x / (x + 1) 
+
+def initialize_p(rng, hp=None, sigma_kappa_inv=4.0, rho=0, canonical_init=False, balanced=False) -> Params: 
     if hp is None: 
         hp = HyperParams() 
     W_key, E_key, z_key, eta_key = jax.random.split(rng, 4) 
-    W = jnp.clip(scale * jax.random.gamma(W_key, a=1, shape=(hp.M, hp.N)), min=1e-6, max=1-1e-6)
-    E  = jnp.repeat(jnp.eye(hp.M), hp.O//hp.M, axis=0) # this is a canonical initialization
+    W = jnp.clip(hp.W_scale * jax.random.gamma(W_key, a=1, shape=(hp.M, hp.N)), min=1e-6, max=1-1e-6)
+    if canonical_init:
+        # better than this: just choose random entries to be 1 so that each row has 1 1 and the rest are 0s. 
+        if balanced:
+            try: 
+                E  = jnp.repeat(jnp.eye(hp.M), hp.L//hp.M, axis=0) # this is a canonical initialization with exactly equal numbers representing each receptor 
+            except:  
+                raise ValueError("For balanced canonical initialization, set L to a postive multiple of M")
+        else: 
+            E = create_one_hot_array(E_key, hp.L, hp.M)
+    else: 
+        phi = PHI_PSI_REGISTRY[hp.phi]
+        E = phi(.5 + .1 * jax.random.normal(E_key, shape = (hp.L, hp.M))) # this is a noncanonical initialization where every neuron expresses roughly the same amount of every receptor. 
     # kappa_inv = jax.random.lognormal(kappa_inv_key, sigma=sigma_kappa_inv, shape=(hp.M, hp.N)) # see "Olfactory Encoding Model" in Reddy and Zak 2018
     eta = jax.random.lognormal(eta_key, shape=(hp.M, hp.N))
     z = jax.random.normal(z_key, shape=(hp.M, hp.N)) 
     kappa_inv = jnp.exp(sigma_kappa_inv * (rho * jnp.log(eta) + jnp.sqrt(1 - rho**2) * z))
     return hp, Params(W, E, kappa_inv, eta)
+
+def initialize_training_state(subkey, hp, p_init): 
+    subkey_cs, subkey_activity, subkey_T, subkey_state = jax.random.split(subkey, 4)
+    T = T_estimator() 
+    draw_cs = ODOR_MODEL_REGISTRY[hp.odor_model]
+    activity_function = ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
+    cs = draw_cs(subkey_cs, hp) 
+    r = activity_function(hp, p_init, cs, subkey_activity)
+    if hp.loss == 'jensen_shannon_loss': 
+        Tp_init = T.init(subkey_T, cs.T, r.T) # this is for variational MI estimation
+    else: 
+        Tp_init = 0 # this is a dummy for Gaussian MI estimation (not variational, so no T network needed)
+    init_state = TrainingState(p_init, Tp_init, subkey_state, metrics={'mi': 0.0})
+    return init_state 
+
+def phi(u): 
+    return 1 / (1 + jnp.exp(-u))
+
+def psi(x): 
+    x = jnp.clip(x, min=1e-6, max=1-1e-6)
+    return jnp.log(x / (1 - x))
+
+def phi(u): 
+    return jax.nn.softmax(u, axis=1)
+
+def psi(x): 
+    return jnp.log(jnp.clip(x, min=1e-6, max=1-1e-6))
 
 def draw_c_sparse_log_normal(subkey, hp): 
     c = jnp.zeros(hp.N)
@@ -106,10 +163,30 @@ def draw_c_sparse_log_normal(subkey, hp):
     c = c.at[non_zero_indices].set(concentrations)
     return c
 
-def draw_cs_sparse_log_normal(subkey, hp):
+def draw_cs_sparse_log_normal(subkey, hp): 
     keybatch = jax.random.split(subkey, hp.P)
-    cs = vmap(draw_c_sparse_log_normal, in_axes=(0, None))(keybatch, hp).T
-    return cs
+    cs = vmap(draw_c_sparse_log_normal, in_axes=(0, None))(keybatch, hp).T 
+    return cs 
+
+def closure_draw_cs_data_driven(path): # closures are nice https://apxml.com/courses/advanced-jax/chapter-1-advanced-jax-transformations-control-flow/closures-jax-staging
+    loaded_data = jnp.load(path)
+    P_total = loaded_data.shape[1]
+    
+    def draw_cs_data_driven_binary(subkey, hp):
+        idx = jax.random.choice(subkey, P_total, shape=(hp.P,), replace=True)
+        batch = jax.device_put(loaded_data[:, idx])  # move to device only once per call
+        return batch  # shape (N, P), like the log_normal one
+    
+    def draw_cs_data_driven_log_normal(subkey, hp):
+        subkey_index, subkey_concentration = jax.random.split(subkey)
+        idx = jax.random.choice(subkey_index, P_total, shape=(hp.P,), replace=True)
+        batch = jax.device_put(loaded_data[:, idx])  # move to device only once per call
+        batch = jnp.where(batch, jax.random.lognormal(subkey_concentration, sigma=hp.sigma_c, shape=batch.shape), jnp.zeros(batch.shape))
+        return batch 
+    
+    return draw_cs_data_driven_binary, draw_cs_data_driven_log_normal
+
+draw_cs_data_driven_binary, draw_cs_data_driven_log_normal = closure_draw_cs_data_driven(DATA_PATH)
 
 def compute_receptor_activity(subkey, hp, p, c):
     pre_activations = p.W @ c
@@ -117,7 +194,7 @@ def compute_receptor_activity(subkey, hp, p, c):
     r = nl(pre_activations) + hp.sigma_0 * jax.random.normal(subkey, shape=pre_activations.shape) 
     return r
 
-def compute_linear_filter_activity(subkey, hp, p, c):
+def compute_linear_filter_activity(hp, p, c, subkey):
     receptor_activations = p.W @ c # p.W is receptor x odorant 
     c_AMP = p.E @ receptor_activations # p.E is neuron x receptor 
     nl = NL_REGISTRY[hp.nonlinearity] 
@@ -127,7 +204,7 @@ def compute_linear_filter_activity(subkey, hp, p, c):
 def compute_osn_firing_rate_with_antagonism(hp, p, c):
     '''generalized version of equation 14 in Reddy, Zak et al. 2018. eta and kappa_inv are receptor x odorant, and the gene expression matrix p.E is neuron x receptor''' 
     receptor_induced_activities = p.E @ (jnp.matmul((p.eta * p.kappa_inv), c) / (1 + jnp.matmul(p.kappa_inv, c))) 
-    denominator = 1 + receptor_induced_activities**-hp.n 
+    denominator = 1 + receptor_induced_activities**-hp.hill_exponent 
     F = hp.F_max / denominator
     return F
 
@@ -137,8 +214,7 @@ def compute_osn_firing_with_antagonism(hp, p, c, subkey):
     firing = firing_rate + hp.sigma_0 * jax.random.normal(subkey, shape=firing_rate.shape)
     return firing # this should be neuron x samples, where c is odorants x samples 
 
-# @partial(jit, static_argnames=['hp'])
-def compute_entropy(r, hp: HyperParams):
+def compute_entropy(r, hp):
     entropy = compute_sum_of_marginal_entropies(r, hp) - compute_information(r)
     return entropy
 
@@ -160,7 +236,6 @@ def vasicek_entropy(X, hp): # see https://github.com/scipy/scipy/blob/main/scipy
 def pad_along_last_axis(X, window):
     first_value = X[0]
     last_value = X[-1]
-    # Use `lax.full_like` to create padded arrays
     Xl = lax.full_like(x=jnp.empty((window,)), fill_value=first_value)
     Xr = lax.full_like(x=jnp.empty((window,)), fill_value=last_value)
     return jnp.concatenate((Xl, X, Xr))
@@ -194,14 +269,11 @@ def f_star_JSD(t): # see Table 2 of https://arxiv.org/pdf/1606.00709
 
 def jensen_shannon_loss(p, Tp, hp, cs, key): 
     key, subkey_firing, subkey_shuffle = jax.random.split(key, 3) 
-    # r = compute_osn_firing_with_antagonism(hp, p, cs, subkey_firing)
-    r = compute_linear_filter_activity(subkey_firing, hp, p, cs) 
+    activity_function = ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
+    r = activity_function(hp, p, cs, subkey_firing) 
     r_shuffled = jax.random.permutation(subkey_shuffle, r, axis=1) 
-
     T_joint = T_estimator().apply(Tp, cs.T, r.T)
-
     T_marginal = T_estimator().apply(Tp, cs.T, r_shuffled.T)
-    
     mi_estimate = jnp.mean(T_joint) - jnp.mean(f_star_JSD(T_marginal))
     return - mi_estimate
 
@@ -213,16 +285,22 @@ def flatten_metrics(metrics_list):
             flattened[k].extend(v)
     return {k: jnp.array(v) for k, v in flattened.items()} 
 
-# @partial(jax.jit, static_argnames=('hp', 'phi', 'psi'))
-def update_params_T(p, Tp, hp, cs, key, phi, psi, gamma_p, gamma_T):
+@partial(jax.jit, static_argnames=('hp'))
+def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T):
     # Split keys
     key, loss_key = jax.random.split(key)
 
     # Compute gradients for MINE network (T) and model params (E)
-    mi_estimate, grads = jax.value_and_grad(
-        jensen_shannon_loss, argnums=(0, 1)
-    )(p, Tp, hp, cs, loss_key)
+    if hp.loss != 'jensen_shannon_loss': 
+        raise ValueError('only the jensen shannon loss requires a T network. For other losses, use update_params')
+    
+    loss = LOSS_REGISTRY[hp.loss] 
+    phi = PHI_PSI_REGISTRY[hp.phi]
+    psi = PHI_PSI_REGISTRY[hp.psi]
 
+    mi_estimate, grads = jax.value_and_grad(
+        loss, argnums=(0, 1)
+    )(p, Tp, hp, cs, loss_key)
     grads_p, grads_T = grads 
 
     # Update MINE network (T)
@@ -235,7 +313,6 @@ def update_params_T(p, Tp, hp, cs, key, phi, psi, gamma_p, gamma_T):
     # natural gradient in dual space is equivalent to mirror descent in primal space. A "straight through" trick. 
     #  phi:unconstrained --> constrained, psi is inverse of phi. 
     # see https://vene.ro/blog/mirror-descent.html#generalizing-the-projected-gradient-method-with-divergences for a very clear exposition
-
     U_current = psi(p.E) # map to dual space 
     U_new = U_current - gamma_p * grads_p.E # grads_p.E is correctly with respect to the primal parameters and evaluated on the primal parameters 
     E_new = phi(U_new) # map back to primal space 
@@ -243,9 +320,13 @@ def update_params_T(p, Tp, hp, cs, key, phi, psi, gamma_p, gamma_T):
 
     return p, Tp, - mi_estimate
 
-def update_params(p, hp, cs, key, phi, psi, gamma_p, loss):
+def update_params(p, hp, cs, key, gamma_p):
     # Split keys
     key, loss_key = jax.random.split(key)
+
+    loss = LOSS_REGISTRY[hp.loss] 
+    phi = PHI_PSI_REGISTRY[hp.phi]
+    psi = PHI_PSI_REGISTRY[hp.psi]
 
     # Compute gradients for MINE network (T) and model params (E)
     mi_estimate, grads_p = jax.value_and_grad(
@@ -263,24 +344,24 @@ def update_params(p, hp, cs, key, phi, psi, gamma_p, loss):
 
     return p, mi_estimate
 
-def scan_step(state, hp, phi, psi, gammas, loss=None): 
-    key, subkey_odors, subkey_loss = jax.random.split(state.key, 3) 
-    cs = draw_cs_sparse_log_normal(subkey_odors, hp)
-    if loss is None: 
-        p_new, Tp_new, mi_estimate = update_params_T(state.p, state.Tp, hp, cs, subkey_loss, phi, psi, gammas[0], gammas[1])
+def scan_step(state, hp, gammas): 
+    key, subkey_odors, subkey_loss = jax.random.split(state.key, 3)
+    draw_cs = ODOR_MODEL_REGISTRY[hp.odor_model] 
+    cs = draw_cs(subkey_odors, hp)
+    if hp.loss == 'jensen_shannon_loss': 
+        p_new, Tp_new, mi_estimate = update_params_T(state.p, state.Tp, hp, cs, subkey_loss, gammas[0], gammas[1])
     else: 
-        p_new, mi_estimate = update_params(state.p, hp, cs, subkey_loss, phi, psi, gammas[0], loss)
+        p_new, mi_estimate = update_params(state.p, hp, cs, subkey_loss, gammas[0])
         Tp_new = 0 
     new_metrics = {'mi': mi_estimate}
     return TrainingState(p_new, Tp_new, key, new_metrics), new_metrics 
 
-@partial(jax.jit, static_argnames=('hp', 'phi', 'psi', 'epochs_per_scan', 'loss'))
-def scan_phase(state, hp, phi, psi, gammas, epochs_per_scan, loss):
+# @partial(jax.jit, static_argnames=('hp', 'epochs_per_scan'))
+def scan_phase(state, hp, gammas, epochs_per_scan):
     """Process multiple epochs in a single scanned phase"""
     # Scan over epochs_per_scan steps
-
     def scan_closure(state, gammas): # this is just a trick so you can pass hp into your scan_step. 
-        state, new_metrics = scan_step(state, hp, phi, psi, gammas, loss)
+        state, new_metrics = scan_step(state, hp, gammas)
         return state, new_metrics 
         
     final_state, metrics = jax.lax.scan(
@@ -291,13 +372,13 @@ def scan_phase(state, hp, phi, psi, gammas, epochs_per_scan, loss):
     )
     return final_state, metrics
 
-def train_natural_gradient_scan_over_epochs(initial_state, hp, phi, psi, gammas, loss, scans=2, epochs_per_scan=2):
+def train_natural_gradient_scan_over_epochs(initial_state, hp, gammas, scans=2, epochs_per_scan=2):
     all_metrics = [] 
     for scan_idx in range(scans):
         # Run scanned phase
         scan_gammas = gammas[scan_idx * epochs_per_scan: (scan_idx+1) * epochs_per_scan]
         state, scan_metrics = scan_phase(
-            initial_state, hp, phi, psi, scan_gammas, epochs_per_scan, loss
+            initial_state, hp, scan_gammas, epochs_per_scan
         )
         scan_metrics = jax.device_get(scan_metrics)  # Move from device to host
 
@@ -308,21 +389,6 @@ def train_natural_gradient_scan_over_epochs(initial_state, hp, phi, psi, gammas,
         initial_state = state
 
     return initial_state, flatten_metrics(all_metrics) 
-
-# for x >= 0: use phi = jnp.exp, psi = jnp.log 
-# for x \in [0, 1] use below
-def phi_01(u): 
-    return 1 / (1 + jnp.exp(-u))
-
-def psi_01(x): 
-    x = jnp.clip(x, min=1e-6, max=1-1e-6)
-    return jnp.log(x / (1 - x))
-
-def phi_simplex(u): 
-    return jax.nn.softmax(u, axis=1)
-
-def psi_simplex(x): 
-    return jnp.log(jnp.clip(x, min=1e-6, max=1-1e-6))
 
 def make_alternating_gammas(epochs_per_scan, scans, gamma_T, gamma_p): 
     gamma_Ts = []
@@ -341,30 +407,35 @@ def make_constant_gammas(epochs_per_scan, scans, gamma_T, gamma_p):
     gamma_ps = [gamma_p] * (epochs_per_scan * scans)
     return jnp.array([gamma_ps, gamma_Ts]).T 
 
+NL_REGISTRY = {
+    'sigmoid log': sigmoid_log,
+    'relu': jax.nn.relu,
+    'tanh': jax.nn.tanh,
+    'id': lambda x : x
+}
 
-def initialize_model(key, M=10, O=100, P=1000, sigma_0=0.01, nonlinearity='sigmoid_log', E_init_scale=0.1, phi=phi_simplex, scans=2, epochs_per_scan=2000): 
-    key, *subkeys = jax.random.split(key, 6)
-    hp = HyperParams(M=M, O=O, P=P, sigma_0=sigma_0, nonlinearity=nonlinearity) 
-    hp, p_init = init_hp_and_p(subkeys[0], hp=hp, scale=E_init_scale)
-    # initialize T 
-    T = T_estimator() 
-    c = draw_cs_sparse_log_normal(subkeys[1], hp) 
-    r = compute_osn_firing_with_antagonism(hp, p_init, c, subkeys[2]) 
-    Tp_init = T.init(subkeys[3], c.T, r.T) # this is for variational MI estimation 
-    # Tp_init = 0 # this is a dummy for Gaussian MI estimation (not variational, so no T network needed)
-    p_init = p_init.replace(E = phi(.5 + .1 * jax.random.normal(subkeys[4], shape=p_init.E.shape))) 
-    init_state = TrainingState(p_init, Tp_init, key, metrics={'mi': 0.0})
-    gammas = make_constant_gammas(epochs_per_scan, scans, gamma_T=1e-1, gamma_p=1e-1) 
-    return init_state, hp, gammas
+ACTIVITY_FUNCTION_REGISTRY = {
+    'linear filter': compute_linear_filter_activity, 
+    'antagonism': compute_osn_firing_with_antagonism
+}
 
+PHI_PSI_REGISTRY = {
+    'softplus_phi': lambda u: jax.nn.softmax(u, axis=1), # rows of expression matrix should sum to 1. 
+    'softplus_psi': lambda x: jnp.log(jnp.clip(x, min=1e-6, max=1-1e-6)), 
+    'bounded_phi': lambda u: 1 / (1 + jnp.exp(-u)), 
+    'bounded_psi': lambda x: jnp.log(jnp.clip(x, min=1e-6, max=1-1e-6) / (1 - jnp.clip(x, 1e-6, 1-1e-6))), 
+    'positive_phi': jnp.exp,
+    'positive_psi': jnp.log
+}
 
-# example of how to run this optimization: 
-''' 
-key = jax.random.key(0)
-phi, psi = phi_simplex, psi_simplex
-scans, epochs_per_scan = 2, 2000
-init_state, hp, gammas = initialize_model(key, scans=scans, epochs_per_scan=epochs_per_scan) 
+LOSS_REGISTRY = {
+    'jensen_shannon_loss': jensen_shannon_loss,
+    'entropy_loss': entropy_loss, 
+    'log_det_loss': log_det_loss
+}
 
-state, metrics = train_natural_gradient_scan_over_epochs(init_state, hp, phi, psi, gammas, None, scans, epochs_per_scan)
-'''
-
+ODOR_MODEL_REGISTRY = {
+    'data-driven binary': draw_cs_data_driven_binary, 
+    'data-driven log normal': draw_cs_data_driven_log_normal, 
+    'log normal': draw_cs_sparse_log_normal
+}
