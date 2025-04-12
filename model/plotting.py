@@ -59,7 +59,7 @@ def compute_expression_ratios(E):
     return ratios
 
 
-def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1):
+def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1, c_bin=True):
     mosaic = [["E_init", "E_final", "MI"], ["hist_init", "hist_final", "."]]
     fig, axs = plt.subplot_mosaic(
         mosaic, 
@@ -79,7 +79,10 @@ def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1):
     axs["E_final"].set_title(r"$E_{final}$")
     fig.colorbar(im1, ax=[axs["E_init"], axs["E_final"]], location="right", pad=0.1)
     axs["MI"].plot(jnp.clip(mis, mi_clip))
-    axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
+    if c_bin: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")
+    else: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
     axs["MI"].set_xlabel("epochs") 
     if metric == 'ratio_max_to_second': 
         init_ratios = jnp.log(compute_expression_ratios(E_init))

@@ -20,7 +20,8 @@
     "sigma_kappa_inv": 4.0,
     "rho": 0.0,
     "canonical_init": false,
-    "balanced_init": false 
+    "balanced_init": false, 
+    "binarize_c_for_MI_computation": false
   },
   "training": {
       "scans": 2,

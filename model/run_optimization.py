@@ -50,7 +50,7 @@ state, metrics = train_natural_gradient_scan_over_epochs(
 
 jax.numpy.save('E_final', state.p.E)
 # fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics["mi"], subkeys[2])
-fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"])
+fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"], c_bin=hp.binarize_c_for_MI_computation)
 fig.suptitle(
     f"{hp.activity_model} activity, {hp.odor_model} odor model\n"
     fr"$\gamma_p = {t.gamma_p:.3f}\ \ \gamma_T = {t.gamma_T:.3f}$", 

@@ -39,6 +39,7 @@ class HyperParams(NamedTuple):
     rho: float = 0.0 # ditto
     canonical_init: bool = False 
     balanced_init: bool = False 
+    binarize_c_for_MI_computation: bool = False 
 
 
 class TrainingConfig(NamedTuple):
@@ -356,6 +357,8 @@ def jensen_shannon_loss(p, Tp, hp, cs, key):
     activity_function = ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
     r = activity_function(hp, p, cs, subkey_firing)
     r_shuffled = jax.random.permutation(subkey_shuffle, r, axis=1)
+    if hp.binarize_c_for_MI_computation: 
+        cs = (cs != 0).astype(float) 
     T_joint = T_estimator().apply(Tp, cs.T, r.T)
     T_marginal = T_estimator().apply(Tp, cs.T, r_shuffled.T)
     mi_estimate = jnp.mean(T_joint) - jnp.mean(f_star_JSD(T_marginal))
@@ -481,7 +484,7 @@ def train_natural_gradient_scan_over_epochs(
         scan_metrics = jax.device_get(scan_metrics)  # Move from device to host
 
         all_metrics.append(scan_metrics)
-        if scan_idx % 10 == 0:
+        if scan_idx % 1 == 0:
             avg_mi = jnp.mean(jnp.array(scan_metrics["mi"]))
             print(f"Scan {scan_idx}: Avg MI {avg_mi:.3f}")
         initial_state = state
