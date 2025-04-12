@@ -16,17 +16,24 @@
     "activity_model": "linear filter",
     "loss": "jensen_shannon_loss",
     "phi": "softplus_phi",
-    "psi": "softplus_psi"
+    "psi": "softplus_psi",
+    "sigma_kappa_inv": 4.0,
+    "rho": 0.0,
+    "canonical_init": false,
+    "balanced_init": false 
   },
   "training": {
       "scans": 2,
       "epochs_per_scan": 1000,
       "gamma_p": 0.1,
-      "gamma_T": 0.1
+      "gamma_T": 0.1,
+      "T_hidden_dim": 128, 
+      "T_mode": "inner_product"
   },
   "logging": {
     "log_interval": 10,
     "save_model": true,
-    "output_dir": "./results/"
+      "output_dir": "./results/",
+      "config_id": 0
   }
 }

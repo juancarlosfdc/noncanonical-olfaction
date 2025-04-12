@@ -14,22 +14,16 @@ from typing import NamedTuple
 from flax import struct
 
 plt.rcParams["font.size"] = 20
-DATA_PATH = "/Users/juancarlos/noncanonical-olfaction/rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
+DATA_PATH = "/n/home10/jfernandezdelcasti/noncanonical-olfaction/rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
 
 
 class HyperParams(NamedTuple):
-    N: int = (
-        100  # number of odorants. this needs to match the number of variables (rows) in the data when using the data driven model.
-    )
-    n: int = (
-        2  # sparsity of odor vectors--only applies for the Qin et al 2019 odor model
-    )
+    N: int = 100  # number of odorants. this needs to match the number of variables (rows) in the data when using the data driven model.
+    n: int = 2  # sparsity of odor vectors--only applies for the Qin et al 2019 odor model
     M: int = 30  # number of odorant receptors
     L: int = 300  # number of olfactory receptor neurons
     P: int = 1000  # number of samples when we compute MI
-    window: int = (
-        32  # this should be set to jnp.round(jnp.sqrt(P) + 0.5).astype(int) but doing this dynamically makes hp not hashable. So change it when you change P!
-    )
+    window: int = 32  # this should be set to jnp.round(jnp.sqrt(P) + 0.5).astype(int) but doing this dynamically makes hp not hashable. So change it when you change P!
     sigma_0: float = 0.01  # neural noise in Gaussian linear filter model
     sigma_c: float = 2.0  # std_dev of log normal Qin et al 2019 odorant model
     W_scale: float = 0.1
@@ -41,6 +35,10 @@ class HyperParams(NamedTuple):
     loss: str = "jensen_shannon_loss"
     phi: str = "softplus_phi"
     psi: str = "softplus_psi"
+    sigma_kappa_inv: float = 4.0 # this is for Reddy et al. 2018 antagonism model 
+    rho: float = 0.0 # ditto
+    canonical_init: bool = False 
+    balanced_init: bool = False 
 
 
 class TrainingConfig(NamedTuple):
@@ -48,12 +46,15 @@ class TrainingConfig(NamedTuple):
     epochs_per_scan: int = 100
     gamma_p: float = 0.1
     gamma_T: float = 0.1
+    T_hidden_dim: int = 128
+    T_mode: str = "inner_product"
 
 
 class LoggingConfig(NamedTuple):
     log_interval: int = None
     save_model: bool = False
     output_dir: str = "."
+    config_id: str = "0"
 
 
 class FullConfig(NamedTuple):
@@ -75,37 +76,38 @@ class Params:
 
 class T_estimator(nn.Module):
     hidden_dim: int = 128
+    mode: str = "inner_product" 
 
     def g_f(self, v):
         return jnp.clip(
             jnp.log(2) - jnp.log(1 + jnp.exp(-v)), max=jnp.log(2) - 1e-6
         )  # see Table 2 of https://arxiv.org/pdf/1606.00709
 
+
     @nn.compact
     def __call__(self, c, r):
-        # batch should be the first dimension here. this is contra everything else in our pipeline, so be careful! transpose just before passing in c and r
-        r = nn.Dense(self.hidden_dim)(r)
-        r = nn.tanh(r)
-        r = nn.Dense(self.hidden_dim)(r)
-        r = nn.tanh(r)
-        c = nn.Dense(self.hidden_dim)(c)
-        c = nn.tanh(c)
-        c = nn.Dense(self.hidden_dim)(c)
-        c = nn.tanh(c)
-        # Dot product for each sample
-        v = jnp.einsum("bi,bi->b", c, r)  # or use vmap(jnp.dot)(c, r)
-        return self.g_f(v)
+         # batch should be the first dimension here. this is contra everything else in our pipeline, so be careful! transpose just before passing in c and r
+        if self.mode == "inner_product": 
+            r = nn.Dense(self.hidden_dim)(r)
+            r = nn.tanh(r)
+            r = nn.Dense(self.hidden_dim)(r)
+            r = nn.tanh(r)
+            c = nn.Dense(self.hidden_dim)(c)
+            c = nn.tanh(c)
+            c = nn.Dense(self.hidden_dim)(c)
+            c = nn.tanh(c)
+            v = jnp.einsum("bi,bi->b", c, r)  # or use vmap(jnp.dot)(c, r)
+            return self.g_f(v)
 
-    # @nn.compact
-    # def __call__(self, c, r):
-    #     # Concatenate c (P, N) and r (P, L) -> (P, N + L)
-    #     x = jnp.concatenate([c, r], axis=1)
-    #     x = nn.Dense(self.hidden_dim)(x)
-    #     x = nn.relu(x)
-    #     x = nn.Dense(self.hidden_dim)(x)
-    #     x = nn.relu(x)
-    #     v = nn.Dense(1)(x)
-    #     return self.g_f(v)
+        elif self.mode == "concatenate": 
+            # Concatenate c (P, N) and r (P, L) -> (P, N + L)
+            x = jnp.concatenate([c, r], axis=1)
+            x = nn.Dense(self.hidden_dim)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(self.hidden_dim)(x)
+            x = nn.tanh(x)
+            v = nn.Dense(1)(x)
+        return self.g_f(v)
 
 
 @struct.dataclass
@@ -118,16 +120,14 @@ class TrainingState:
 
 def create_one_hot_array(key, L, M):
     indices = jax.random.randint(key, (L,), 0, M)
-    return jax.nn.one_hot(indices, M, dtype=jnp.int32)
+    return jax.nn.one_hot(indices, M, dtype=float)
 
 
 def sigmoid_log(x):
     return x / (x + 1)
 
 
-def initialize_p(
-    rng, hp=None, sigma_kappa_inv=4.0, rho=0, canonical_init=False, balanced=False
-) -> Params:
+def initialize_p(rng, hp=None) -> Params:
     if hp is None:
         hp = HyperParams()
     W_key, E_key, z_key, eta_key = jax.random.split(rng, 4)
@@ -136,19 +136,18 @@ def initialize_p(
         min=1e-6,
         max=1 - 1e-6,
     )
-    if canonical_init:
-        # better than this: just choose random entries to be 1 so that each row has 1 1 and the rest are 0s.
-        if balanced:
+    if hp.canonical_init:
+        if hp.balanced_init:
             try:
                 E = jnp.repeat(
                     jnp.eye(hp.M), hp.L // hp.M, axis=0
-                )  # this is a canonical initialization with exactly equal numbers representing each receptor
+                ).astype(float)  # this is a canonical initialization with exactly equal numbers representing each receptor
             except:
                 raise ValueError(
                     "For balanced canonical initialization, set L to a postive multiple of M"
                 )
         else:
-            E = create_one_hot_array(E_key, hp.L, hp.M)
+            E = create_one_hot_array(E_key, hp.L, hp.M) 
     else:
         phi = PHI_PSI_REGISTRY[hp.phi]
         E = phi(
@@ -158,14 +157,17 @@ def initialize_p(
     eta = jax.random.lognormal(eta_key, shape=(hp.M, hp.N))
     z = jax.random.normal(z_key, shape=(hp.M, hp.N))
     kappa_inv = jnp.exp(
-        sigma_kappa_inv * (rho * jnp.log(eta) + jnp.sqrt(1 - rho**2) * z)
+        hp.sigma_kappa_inv * (hp.rho * jnp.log(eta) + jnp.sqrt(1 - hp.rho**2) * z)
     )
     return hp, Params(W, E, kappa_inv, eta)
 
 
-def initialize_training_state(subkey, hp, p_init):
+def initialize_training_state(subkey, hp, p_init, training_config):
     subkey_cs, subkey_activity, subkey_T, subkey_state = jax.random.split(subkey, 4)
-    T = T_estimator()
+    T = T_estimator(
+        hidden_dim = training_config.T_hidden_dim,
+        mode = training_config.T_mode
+        )
     draw_cs = ODOR_MODEL_REGISTRY[hp.odor_model]
     activity_function = ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
     cs = draw_cs(subkey_cs, hp)

@@ -11,8 +11,10 @@ from model import (
     make_constant_gammas,
     train_natural_gradient_scan_over_epochs,
 )
-from plotting import plot_activity
+from plotting import plot_activity, plot_expression 
 
+print(jax.default_backend())
+jax.config.update("jax_default_matmul_precision", "high") 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", type=str, required=False)
@@ -35,7 +37,7 @@ key, *subkeys = jax.random.split(key, 4)
 hp = config.hyperparams
 hp, p_init = initialize_p(subkeys[0], hp=hp)
 
-init_state = initialize_training_state(subkeys[1], hp, p_init)
+init_state = initialize_training_state(subkeys[1], hp, p_init, config.training)
 
 t = config.training
 gammas = make_constant_gammas(
@@ -46,6 +48,13 @@ state, metrics = train_natural_gradient_scan_over_epochs(
     init_state, hp, gammas, t.scans, t.epochs_per_scan
 )
 
-fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics["mi"], subkeys[2])
-fig.suptitle(f"{hp.activity_model} activity, {hp.odor_model} odor model", y=1.05)
-fig.savefig("tmp.png", bbox_inches="tight")
+jax.numpy.save('E_final', state.p.E)
+# fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics["mi"], subkeys[2])
+fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"])
+fig.suptitle(
+    f"{hp.activity_model} activity, {hp.odor_model} odor model\n"
+    fr"$\gamma_p = {t.gamma_p:.3f}\ \ \gamma_T = {t.gamma_T:.3f}$", 
+    y=1.05
+)
+
+fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.png", bbox_inches="tight")
