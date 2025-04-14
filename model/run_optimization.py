@@ -48,7 +48,6 @@ state, metrics = train_natural_gradient_scan_over_epochs(
     init_state, hp, gammas, t.scans, t.epochs_per_scan
 )
 
-jax.numpy.save('E_final', state.p.E)
 # fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics["mi"], subkeys[2])
 fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"], c_bin=hp.binarize_c_for_MI_computation)
 fig.suptitle(

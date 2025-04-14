@@ -9,6 +9,7 @@
     "sigma_0": 0.01,
     "sigma_c": 2.0,
     "W_scale": 0.1,
+    "W_shape": 1,
     "nonlinearity": "sigmoid log",
     "F_max": 25.0,
     "hill_exponent": 4,
@@ -21,7 +22,7 @@
     "rho": 0.0,
     "canonical_init": false,
     "balanced_init": false, 
-    "binarize_c_for_MI_computation": false
+    "binarize_c_for_MI_computation": true
   },
   "training": {
       "scans": 2,

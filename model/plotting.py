@@ -107,6 +107,8 @@ def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1, c_bin=Tr
         axs['hist_final'].scatter(range(E_final.shape[0]), jnp.sort(jnp.max(E_final, axis=1)))
         ax23_title = 'row-wise maxima'
     # [ax.legend() for ax in [axs["hist_init"], axs["hist_final"]]]
+    axs['hist_init'].set_title(r'$E_{init}$')
+    axs['hist_final'].set_title(r'$E_{final}$')
     [ax.set_xlabel("ORNs") for ax in [axs["hist_init"], axs["hist_final"]]]
     ax23 = fig.add_subplot(223, frameon=False)
     ax23.set_xticks([])
