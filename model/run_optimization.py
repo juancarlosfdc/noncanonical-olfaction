@@ -12,6 +12,7 @@ from model import (
     train_natural_gradient_scan_over_epochs,
 )
 from plotting import plot_activity, plot_expression 
+import shutil  
 
 print(jax.default_backend())
 jax.config.update("jax_default_matmul_precision", "high") 
@@ -49,11 +50,17 @@ state, metrics = train_natural_gradient_scan_over_epochs(
 )
 
 # fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics["mi"], subkeys[2])
-fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"], c_bin=hp.binarize_c_for_MI_computation)
+fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"], hp, t)
 fig.suptitle(
-    f"{hp.activity_model} activity, {hp.odor_model} odor model\n"
-    fr"$\gamma_p = {t.gamma_p:.3f}\ \ \gamma_T = {t.gamma_T:.3f}$", 
-    y=1.05
+    f"{hp.activity_model} activity, {hp.odor_model} odor model"
 )
 
 fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.png", bbox_inches="tight")
+
+# with open(f"{config.logging.output_dir}/config_{config.logging.config_id}.json", "w") as c: 
+#     json.dump(config, c)
+
+shutil.copy2(args.config, f"{config.logging.output_dir}/config_{config.logging.config_id}.json")
+
+
+# just cp the config file into your results directory! it's that simple. 

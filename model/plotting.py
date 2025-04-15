@@ -59,8 +59,56 @@ def compute_expression_ratios(E):
     return ratios
 
 
-def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1, c_bin=True):
-    mosaic = [["E_init", "E_final", "MI"], ["hist_init", "hist_final", "."]]
+def plot_sorted_values(E, ax): 
+    max_values = jnp.max(E, axis=1)  # Get max per row
+    second_max_values = jnp.sort(E, axis=1)[:, -2]  # Second-highest per row
+    # Sort indices based on max_values to maintain ordering
+    sorted_indices = jnp.argsort(max_values)
+    ax.scatter(range(len(max_values)), max_values[sorted_indices], label='max value')
+    ax.scatter(range(len(second_max_values)), second_max_values[sorted_indices], label='second-to-max', alpha=0.5)
+    return ax 
+
+
+def render_parameters(ax_table, hp, t): 
+    keys = ["L", "M", "sigma_0", "W_shape"]
+    cell_text = [[str(key), str(getattr(hp, key))] for key in keys if hasattr(hp, key)]   
+    keys = ["L", "M", "sigma_0", "W_shape", "gamma_p", "gamma_T"]
+    display_keys = {"L": "L", 
+                    "M": "M", 
+                    "sigma_0": r"$\sigma_0$", 
+                    "W_shape": r"$W_{\mathrm{shape}}$", 
+                    "gamma_p": r"$\gamma_p$",
+                    "gamma_T": r"$\gamma_T$",
+                    "odor_model": "odor model",
+                    "activity_model": "activity model"}
+    
+    cell_text = [
+    [
+        display_keys[key],
+        str(int(getattr(hp, key))) if isinstance(getattr(hp, key), int)
+        else f"{getattr(hp, key):.3f}" if isinstance(getattr(hp, key), float)
+        else str(getattr(hp, key))
+    ] 
+    for key in keys 
+    if hasattr(hp, key)
+    ] 
+    cell_text += [[display_keys[key], f"{getattr(t, key):.3f}"] for key in keys if hasattr(t, key)]   
+    table = ax_table.table(
+        cellText=cell_text,
+        colLabels=["Parameter", "Value"],
+        loc="center",
+        cellLoc="left",
+        bbox=[0, 0, 1, 1]
+    )
+    ax_table.axis("off")  # Hide axes
+    ax_table.set_title("Hyperparameters")
+    table.auto_set_font_size(False)
+    table.set_fontsize(20)
+    return ax_table 
+
+
+def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1): 
+    mosaic = [["E_init", "E_final", "MI"], ["hist_init", "hist_final", "params"]]
     fig, axs = plt.subplot_mosaic(
         mosaic, 
         figsize=(18, 10),
@@ -79,7 +127,7 @@ def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1, c_bin=Tr
     axs["E_final"].set_title(r"$E_{final}$")
     fig.colorbar(im1, ax=[axs["E_init"], axs["E_final"]], location="right", pad=0.1)
     axs["MI"].plot(jnp.clip(mis, mi_clip))
-    if c_bin: 
+    if hp.binarize_c_for_MI_computation: 
         axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")
     else: 
         axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
@@ -103,9 +151,10 @@ def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1, c_bin=Tr
         axs['hist_final'].hist(jnp.max(E_final, axis=1))
         ax23_title = 'row-wise maxima'
     elif metric == 'scatter': 
-        axs['hist_init'].scatter(range(E_init.shape[0]), jnp.sort(jnp.max(E_init, axis=1)))
-        axs['hist_final'].scatter(range(E_final.shape[0]), jnp.sort(jnp.max(E_final, axis=1)))
+        axs['hist_init'] = plot_sorted_values(E_init, axs['hist_init'])
+        axs['hist_final'] = plot_sorted_values(E_final, axs['hist_final'])
         ax23_title = 'row-wise maxima'
+        axs['hist_init'].legend() 
     # [ax.legend() for ax in [axs["hist_init"], axs["hist_final"]]]
     axs['hist_init'].set_title(r'$E_{init}$')
     axs['hist_final'].set_title(r'$E_{final}$')
@@ -114,6 +163,7 @@ def plot_expression(E_init, E_final, mis, metric='scatter', mi_clip=-1, c_bin=Tr
     ax23.set_xticks([])
     ax23.set_yticks([])
     ax23.set_title(ax23_title, loc="right")    
+    axs["params"] = render_parameters(axs["params"], hp, t) 
     return fig, axs
 
 
