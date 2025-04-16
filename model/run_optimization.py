@@ -29,6 +29,7 @@ def load_config(path: str) -> FullConfig:
         hyperparams=HyperParams(**cfg_dict["hyperparams"]),
         training=TrainingConfig(**cfg_dict["training"]),
         logging=LoggingConfig(**cfg_dict["logging"]),
+        seed=cfg_dict["seed"]
     )
 
 
@@ -61,6 +62,3 @@ fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.
 #     json.dump(config, c)
 
 shutil.copy2(args.config, f"{config.logging.output_dir}/config_{config.logging.config_id}.json")
-
-
-# just cp the config file into your results directory! it's that simple. 
