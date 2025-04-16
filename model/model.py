@@ -26,6 +26,7 @@ class HyperParams(NamedTuple):
     window: int = 32  # this should be set to jnp.round(jnp.sqrt(P) + 0.5).astype(int) but doing this dynamically makes hp not hashable. So change it when you change P!
     sigma_0: float = 0.01  # neural noise in Gaussian linear filter model
     sigma_c: float = 2.0  # std_dev of log normal Qin et al 2019 odorant model
+    W_shape: float = 1.0 
     W_scale: float = 0.1
     nonlinearity: str = "sigmoid log"
     F_max: float = 25.0
@@ -133,7 +134,7 @@ def initialize_p(rng, hp=None) -> Params:
         hp = HyperParams()
     W_key, E_key, z_key, eta_key = jax.random.split(rng, 4)
     W = jnp.clip(
-        hp.W_scale * jax.random.gamma(W_key, a=1, shape=(hp.M, hp.N)),
+        hp.W_scale * jax.random.gamma(W_key, a=hp.W_shape, shape=(hp.M, hp.N)),
         min=1e-6,
         max=1 - 1e-6,
     )
