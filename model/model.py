@@ -14,7 +14,7 @@ from typing import NamedTuple
 from flax import struct
 
 plt.rcParams["font.size"] = 20
-DATA_PATH = "/n/home10/jfernandezdelcasti/noncanonical-olfaction/rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
+DATA_PATH = "../rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
 
 
 class HyperParams(NamedTuple):
