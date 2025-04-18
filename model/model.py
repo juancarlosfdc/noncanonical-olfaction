@@ -12,6 +12,7 @@ from jax.scipy.linalg import cholesky
 from functools import partial
 from typing import NamedTuple
 from flax import struct
+from functools import partial 
 
 plt.rcParams["font.size"] = 20
 DATA_PATH = "/n/home10/jfernandezdelcasti/noncanonical-olfaction/rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
@@ -135,8 +136,8 @@ def initialize_p(rng, hp=None) -> Params:
     W_key, E_key, z_key, eta_key = jax.random.split(rng, 4)
     W = jnp.clip(
         hp.W_scale * jax.random.gamma(W_key, a=hp.W_shape, shape=(hp.M, hp.N)),
-        min=1e-6,
-        max=1 - 1e-6,
+        min=1e-9,
+        max=1 - 1e-9,
     )
     if hp.canonical_init:
         if hp.balanced_init:
@@ -207,7 +208,7 @@ def draw_c_sparse_log_normal(subkey, hp):
     c = c.at[non_zero_indices].set(concentrations)
     return c
 
-
+@partial(jax.jit, static_argnames=['hp'])
 def draw_cs_sparse_log_normal(subkey, hp):
     keybatch = jax.random.split(subkey, hp.P)
     cs = vmap(draw_c_sparse_log_normal, in_axes=(0, None))(keybatch, hp).T
