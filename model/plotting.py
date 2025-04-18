@@ -70,15 +70,14 @@ def plot_sorted_values(E, ax):
 
 
 def render_parameters(ax_table, hp, t): 
-    keys = ["L", "M", "sigma_0", "W_shape"]
-    cell_text = [[str(key), str(getattr(hp, key))] for key in keys if hasattr(hp, key)]   
-    keys = ["L", "M", "sigma_0", "W_shape", "gamma_p", "gamma_T"]
+    keys = ["L", "M", "sigma_0", "W_shape", "sigma_c", "gamma_p", "gamma_T"]
     display_keys = {"L": "L", 
                     "M": "M", 
                     "sigma_0": r"$\sigma_0$", 
                     "W_shape": r"$W_{\mathrm{shape}}$", 
                     "gamma_p": r"$\gamma_p$",
                     "gamma_T": r"$\gamma_T$",
+                    "sigma_c": r"$\sigma_c$",
                     "odor_model": "odor model",
                     "activity_model": "activity model"}
     
@@ -107,7 +106,7 @@ def render_parameters(ax_table, hp, t):
     return ax_table 
 
 
-def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1): 
+def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E_clip=1e-4, log_scale=True): 
     mosaic = [["E_init", "E_final", "MI"], ["hist_init", "hist_final", "params"]]
     fig, axs = plt.subplot_mosaic(
         mosaic, 
@@ -119,13 +118,24 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1):
     axs["E_final"].tick_params(labelbottom=False)
     axs["E_init"].set_ylabel("ORNs")
     axs["E_init"].set_xlabel("ORs", labelpad=5)
-    vmin = min(E_init.min(), E_final.min())
-    vmax = max(E_init.max(), E_final.max())
-    im1 = axs["E_init"].imshow(E_init, vmin=vmin, vmax=vmax, aspect="auto")
+    if log_scale: 
+        E_final = jnp.maximum(E_final, E_clip)
+        vmin = jnp.log10(min(E_init.min(), E_final.min())) 
+        vmax = jnp.log10(max(E_init.max(), E_final.max())) # good ole log is monotonic 
+        im1 = axs["E_init"].imshow(jnp.log10(E_init), vmin=vmin, vmax=vmax, aspect="auto")
+        im2 = axs["E_final"].imshow(jnp.log10(E_final), vmin=vmin, vmax=vmax, aspect="auto")
+        cbar_label = r"$\log_{10}(E_{ij})$"
+    else: 
+        E_final = jnp.maximum(E_final, E_clip)
+        vmin = min(E_init.min(), E_final.min())
+        vmax = max(E_init.max(), E_final.max()) 
+        im1 = axs["E_init"].imshow(E_init, vmin=vmin, vmax=vmax, aspect="auto")
+        im2 = axs["E_final"].imshow(E_final, vmin=vmin, vmax=vmax, aspect="auto")
+        cbar_label = r"$\log(E_{ij})$" 
     axs["E_init"].set_title(r"$E_{init}$")
-    im2 = axs["E_final"].imshow(E_final, vmin=vmin, vmax=vmax, aspect="auto")
     axs["E_final"].set_title(r"$E_{final}$")
-    fig.colorbar(im1, ax=[axs["E_init"], axs["E_final"]], location="right", pad=0.1)
+    cbar = fig.colorbar(im1, ax=[axs["E_init"], axs["E_final"]], location="right", pad=0.05)
+    cbar.ax.set_title(cbar_label, fontsize=16)
     axs["MI"].plot(jnp.clip(mis, mi_clip))
     if hp.binarize_c_for_MI_computation: 
         axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")

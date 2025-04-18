@@ -58,6 +58,9 @@ fig.suptitle(
 
 fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.png", bbox_inches="tight")
 
+jax.numpy.save(f"{config.logging.output_dir}/E_final_{config.logging.config_id}", state.p.E)
+jax.numpy.save(f"{config.logging.output_dir}/W_{config.logging.config_id}", state.p.W)
+
 # with open(f"{config.logging.output_dir}/config_{config.logging.config_id}.json", "w") as c: 
 #     json.dump(config, c)
 

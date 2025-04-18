@@ -12,6 +12,7 @@ from jax.scipy.linalg import cholesky
 from functools import partial
 from typing import NamedTuple
 from flax import struct
+from functools import partial 
 
 plt.rcParams["font.size"] = 20
 DATA_PATH = "../rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
@@ -207,7 +208,7 @@ def draw_c_sparse_log_normal(subkey, hp):
     c = c.at[non_zero_indices].set(concentrations)
     return c
 
-
+@partial(jax.jit, static_argnames=['hp'])
 def draw_cs_sparse_log_normal(subkey, hp):
     keybatch = jax.random.split(subkey, hp.P)
     cs = vmap(draw_c_sparse_log_normal, in_axes=(0, None))(keybatch, hp).T
