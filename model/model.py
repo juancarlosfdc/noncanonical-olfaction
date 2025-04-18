@@ -135,8 +135,8 @@ def initialize_p(rng, hp=None) -> Params:
     W_key, E_key, z_key, eta_key = jax.random.split(rng, 4)
     W = jnp.clip(
         hp.W_scale * jax.random.gamma(W_key, a=hp.W_shape, shape=(hp.M, hp.N)),
-        min=1e-6,
-        max=1 - 1e-6,
+        min=1e-9,
+        max=1 - 1e-9,
     )
     if hp.canonical_init:
         if hp.balanced_init:
