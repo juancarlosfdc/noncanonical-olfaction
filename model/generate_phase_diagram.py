@@ -5,6 +5,7 @@ import sys
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 import argparse
+plt.rcParams['font.size'] = 14
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Generate contour plots with optional log scaling')
@@ -39,7 +40,7 @@ data = {
 }
 
 def compute_noncanonical_score(E): 
-    return - np.mean(E * np.log(E))
+    return - np.mean(E * np.log(E)) / np.log(E.shape[0])
 
 for E_file, config_file in zip(E_files, config_files):
     # Load config and extract parameters
@@ -70,27 +71,76 @@ if np.min(metric) < 1e-5:
 else:
     cbar_label = 'score'  # Label for linear scale
 
-if log_param1_scale: 
-    contour = ax.tricontourf(np.log10(param1), param2, metric, levels=20, cmap='viridis')
-    ax.scatter(np.log10(param1), param2, c='black') 
-else: 
-    contour = ax.tricontourf(param1, param2, metric, levels=20, cmap='viridis')
-    ax.scatter(param1, param2, c='black') 
+import numpy as np
+import matplotlib.pyplot as plt
 
+# Get sorted unique values
+unique_param1 = np.sort(np.unique(param1))
+unique_param2 = np.sort(np.unique(param2))
 
+# Number of bins
+n_x = len(unique_param1)
+n_y = len(unique_param2)
 
-# Add colorbar with the correct label
-cbar = plt.colorbar(contour, ax=ax)
-cbar.set_label(cbar_label)
+# Calculate bin edges
+if log_param1_scale:
+    log_param1 = np.log10(unique_param1)
+    param1_edges = np.concatenate([
+        [log_param1[0] - (log_param1[1]-log_param1[0])/2],  # Left edge
+        (log_param1[1:] + log_param1[:-1])/2,               # Midpoints
+        [log_param1[-1] + (log_param1[-1]-log_param1[-2])/2] # Right edge
+    ])
+else:
+    param1_edges = np.concatenate([
+        [unique_param1[0] - (unique_param1[1]-unique_param1[0])/2],
+        (unique_param1[1:] + unique_param1[:-1])/2,
+        [unique_param1[-1] + (unique_param1[-1]-unique_param1[-2])/2]
+    ])
 
+param2_edges = np.concatenate([
+    [unique_param2[0] - (unique_param2[1]-unique_param2[0])/2],
+    (unique_param2[1:] + unique_param2[:-1])/2,
+    [unique_param2[-1] + (unique_param2[-1]-unique_param2[-2])/2]
+])
+
+# Create plot
+fig, ax = plt.subplots(figsize=(10, 8))
+
+# Plot using pcolormesh with exact edges
+plot_data = metric.reshape(n_x, n_y).T  # Transpose for correct orientation
 
 if log_param1_scale:
-    xticks = np.log10(param1)
-    xtick_labels = [fr'$10^{{{x:.1f}}}$' for x in xticks]
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(xtick_labels)
-    ax.xaxis.set_minor_locator(LogLocator(subs='all', numticks=10))  
-    ax.grid(True, which='both', linestyle=':', alpha=0.5) 
+    mesh = ax.pcolormesh(param1_edges, param2_edges, plot_data,
+                        shading='flat', cmap='viridis')
+else:
+    mesh = ax.pcolormesh(param1_edges, param2_edges, plot_data,
+                        shading='flat', cmap='viridis')
+
+# Set ticks at box centers
+if log_param1_scale:
+    ax.set_xticks(log_param1)
+    ax.set_xticklabels([fr'$10^{{{x:.1f}}}$' for x in log_param1])
+else:
+    ax.set_xticks(unique_param1)
+    ax.set_xticklabels([f'{x:.1f}' for x in unique_param1])
+
+ax.set_yticks(unique_param2)
+ax.set_yticklabels([f'{y:.1f}' for y in unique_param2])
+
+# Critical fix: Set grid lines at the EDGES (not centers)
+ax.set_xticks(param1_edges, minor=True)
+ax.set_yticks(param2_edges, minor=True)
+ax.grid(which='minor', color='white', linestyle='-', linewidth=1)
+ax.tick_params(which='minor', length=0)  # Hide minor ticks
+# Increase tick label size for both axes
+ax.tick_params(axis='both', which='major', labelsize=14)  # Adjust 14 to your preferred size
+
+fig.colorbar(mesh, label=cbar_label) 
+
+# Adjust layout
+plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+plt.tight_layout()
+plt.show()
 
 ax.set_xlabel(param1_key) 
 ax.set_ylabel(param2_key)
