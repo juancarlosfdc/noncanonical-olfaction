@@ -122,15 +122,19 @@ def parse_args():
     parser.add_argument("--gamma_shape", type=float, default=1.0, help="shape parameter for gamma distribution (default: 1.0; h will be distributed scale * gamma(shape) + loc)")
     parser.add_argument("--gamma_scale", type=float, default=1/10.0, help="gamma scaling (default = 1/10; h will be distributed scale * gamma(shape) + loc)")
     parser.add_argument("--gamma_loc", type=float, default=-0.11, help="Offset to subtract from gamma values (default: -0.11; h will be distributed scale * gamma(shape) + loc)")
-    parser.add_argument("--lambda_value", type=float, default=1.05, help="j, where J = j / block_size * block diagonal matrix")
+    parser.add_argument("--j", type=float, default=1.05, help="j, where J = j / block_size * block diagonal matrix")
     parser.add_argument("--zero_h", action="store_true", help="Set h to zeros instead of gamma distributed values")
-    parser.add_argument("--lag", type=int, default=200, help="lag for ising model. The spins from gibbs samplign will be downsampled at this rate and burnin = 15 * lag") 
+    parser.add_argument("--lag", type=int, default=25000, help="lag for ising model. The spins from gibbs sampling will be downsampled at this rate and burnin = 15 * lag. default = 25000") 
     parser.add_argument("--beta", type=int, default=1, help="inverse temperature for sampling. default = 1") 
-    parser.add_argument("--iters", type=int, default=100000, help="number of iterations before downsampling. default = 10^5") 
+    parser.add_argument("--iters", type=int, default=1000000, help="number of iterations per epoch. default = 10^6") 
+    parser.add_argument("--epochs", type=int, default=1, help="number of epochs (so total samples is iters * epochs). default = 1")
     return parser.parse_args()
 
 
 if __name__ == "__main__": 
+    jax.config.update("jax_default_matmul_precision", "high")
+    print(jax.default_backend())
+
     args = parse_args()
     
     # Initialize random keys
@@ -145,14 +149,18 @@ if __name__ == "__main__":
                             shape=(args.N,)) * args.gamma_scale + args.gamma_loc
     
     # Generate lambdas and J matrix
-    lambdas = args.lambda_value * jnp.ones((args.block_size,))
+    lambdas = args.j * jnp.ones((args.block_size,))
     J = make_block_diagonal(lambdas, args.N)
     
     # Sample from Ising model
-    s = sample_from_ising_model(subkey_s, h, J, beta=args.beta, iters=args.iters)
-    m = jnp.mean(s, axis=1)
+    samples = [] 
+    for _ in range(args.epochs): 
+        s = sample_from_ising_model(subkey_s, h, J, beta=args.beta, iters=args.iters)
+        samples.append(s) 
+    s = jnp.concatenate(samples, axis=1)
+    magnetization = jnp.mean(s, axis=0) # data is spins x samples 
 
-    fig, ax = plot_tau_vs_lag(m, lags = range(1, 1000)) 
+    fig, ax = plot_tau_vs_lag(magnetization, lags = range(10000, 30000, 1000)) 
     ax.hlines(0.1, xmin=ax.get_xlim()[0], xmax = ax.get_xlim()[1], color='tab:red', ls='--')
     fig.savefig('autocorrelation_vs_lag.png')
 
@@ -163,7 +171,7 @@ if __name__ == "__main__":
     fig.savefig('mean_histogram.png')
 
     fig, ax = plt.subplots() 
-    ax.imshow(indep_s) 
+    ax.imshow(indep_s, aspect='auto') 
     fig.savefig('samples.png')
 
     sigma = jnp.cov(indep_s)
