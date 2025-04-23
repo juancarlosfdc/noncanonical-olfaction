@@ -106,7 +106,7 @@ def render_parameters(ax_table, hp, t):
     return ax_table 
 
 
-def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E_clip=1e-4, log_scale=True): 
+def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E_clip=1e-4, log_scale=True, key=None): 
     mosaic = [["E_init", "E_final", "MI"], ["hist_init", "hist_final", "params"]]
     fig, axs = plt.subplot_mosaic(
         mosaic, 
@@ -116,21 +116,27 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E
     axs["E_final"].sharey(axs["E_init"])
     axs["E_final"].tick_params(labelleft=False)
     axs["E_final"].tick_params(labelbottom=False)
-    axs["E_init"].set_ylabel("ORNs")
     axs["E_init"].set_xlabel("ORs", labelpad=5)
+    if E_init.shape[0] > 2 * E_init.shape[1]: 
+        rows = jax.random.choice(key, E_init.shape[0], shape=(E_init.shape[1] * 2,), replace=False)
+        E_init = E_init[rows, :]
+        E_final = E_final[rows, :]
+        axs["E_init"].set_ylabel("ORNs (downsampled)")
+    else: 
+        axs["E_init"].set_ylabel("ORNs")
     if log_scale: 
         E_final = jnp.maximum(E_final, E_clip)
         vmin = jnp.log10(min(E_init.min(), E_final.min())) 
         vmax = jnp.log10(max(E_init.max(), E_final.max())) # good ole log is monotonic 
-        im1 = axs["E_init"].imshow(jnp.log10(E_init), vmin=vmin, vmax=vmax, aspect="auto")
-        im2 = axs["E_final"].imshow(jnp.log10(E_final), vmin=vmin, vmax=vmax, aspect="auto")
+        im1 = axs["E_init"].imshow(jnp.log10(E_init), vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+        im2 = axs["E_final"].imshow(jnp.log10(E_final), vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
         cbar_label = r"$\log_{10}(E_{ij})$"
     else: 
         E_final = jnp.maximum(E_final, E_clip)
         vmin = min(E_init.min(), E_final.min())
         vmax = max(E_init.max(), E_final.max()) 
-        im1 = axs["E_init"].imshow(E_init, vmin=vmin, vmax=vmax, aspect="auto")
-        im2 = axs["E_final"].imshow(E_final, vmin=vmin, vmax=vmax, aspect="auto")
+        im1 = axs["E_init"].imshow(E_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+        im2 = axs["E_final"].imshow(E_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
         cbar_label = r"$\log(E_{ij})$" 
     axs["E_init"].set_title(r"$E_{init}$")
     axs["E_final"].set_title(r"$E_{final}$")

@@ -12,3 +12,4 @@ __pycache__/
 rbm/*.slurm
 !rbm/template_train_RBM_array.slurm
 rbm/make_hyperparameters.py
+model/*.json

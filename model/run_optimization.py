@@ -51,12 +51,12 @@ state, metrics = train_natural_gradient_scan_over_epochs(
 )
 
 # fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics["mi"], subkeys[2])
-fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"], hp, t)
+fig, axs = plot_expression(init_state.p.E, state.p.E, metrics["mi"], hp, t, key=subkeys[2])
 fig.suptitle(
     f"{hp.activity_model} activity, {hp.odor_model} odor model"
 )
 
-fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.png", bbox_inches="tight")
+fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.png", bbox_inches="tight", dpi=300)
 
 jax.numpy.save(f"{config.logging.output_dir}/E_final_{config.logging.config_id}", state.p.E)
 jax.numpy.save(f"{config.logging.output_dir}/W_{config.logging.config_id}", state.p.W)

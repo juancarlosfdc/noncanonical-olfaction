@@ -5,7 +5,7 @@ import sys
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 import argparse
-plt.rcParams['font.size'] = 14
+plt.rcParams['font.size'] = 18
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Generate contour plots with optional log scaling')
@@ -18,6 +18,8 @@ def parse_arguments():
     # Optional argument with default False
     parser.add_argument('--log_param1', action='store_true',
                        help='Use log scale for param1 (default: False)')
+    parser.add_argument('--overlay_values', action='store_true',
+                       help='Write numbers on heatmap (default: False)')
     
     return parser.parse_args()
 
@@ -71,9 +73,6 @@ if np.min(metric) < 1e-5:
 else:
     cbar_label = 'score'  # Label for linear scale
 
-import numpy as np
-import matplotlib.pyplot as plt
-
 # Get sorted unique values
 unique_param1 = np.sort(np.unique(param1))
 unique_param2 = np.sort(np.unique(param2))
@@ -106,6 +105,13 @@ param2_edges = np.concatenate([
 # Create plot
 fig, ax = plt.subplots(figsize=(10, 8))
 
+    # mosaic = [["E_init", "E_final", "MI"], ["hist_init", "hist_final", "params"]]
+    # fig, axs = plt.subplot_mosaic(
+    #     mosaic, 
+    #     figsize=(18, 10),
+    #     gridspec_kw={"hspace": 0.5}
+    # )
+
 # Plot using pcolormesh with exact edges
 plot_data = metric.reshape(n_x, n_y).T  # Transpose for correct orientation
 
@@ -133,12 +139,27 @@ ax.set_yticks(param2_edges, minor=True)
 ax.grid(which='minor', color='white', linestyle='-', linewidth=1)
 ax.tick_params(which='minor', length=0)  # Hide minor ticks
 # Increase tick label size for both axes
-ax.tick_params(axis='both', which='major', labelsize=14)  # Adjust 14 to your preferred size
+ax.tick_params(axis='both', which='major', labelsize=18)  # Adjust 14 to your preferred size
+
+if args.overlay_values: 
+    for i in range(plot_data.shape[0]):  # Loop over y-axis (rows)
+        for j in range(plot_data.shape[1]):  # Loop over x-axis (columns)
+            # Get the center of the current cell
+            x_center = (param1_edges[j] + param1_edges[j+1]) / 2
+            y_center = (param2_edges[i] + param2_edges[i+1]) / 2
+            
+            # Add the metric value as text
+            ax.text(
+                x_center, y_center,
+                f"{plot_data[i, j]:.2f}",  # Format to 2 decimal places
+                ha='center', va='center',  # Center the text
+                color='white' if plot_data[i, j] > 0.5 * plot_data.max() else 'black'
+        )
 
 fig.colorbar(mesh, label=cbar_label) 
 
 # Adjust layout
-plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+# plt.setp(ax.get_xticklabels())
 plt.tight_layout()
 plt.show()
 
