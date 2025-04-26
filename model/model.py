@@ -24,19 +24,22 @@ class HyperParams(NamedTuple):
     M: int = 30  # number of odorant receptors
     L: int = 300  # number of olfactory receptor neurons
     P: int = 1000  # number of samples when we compute MI
+    K: int = 50 # number of glomeruli (only relevant if computing with glomerular convergence)
     window: int = 32  # this should be set to jnp.round(jnp.sqrt(P) + 0.5).astype(int) but doing this dynamically makes hp not hashable. So change it when you change P!
     sigma_0: float = 0.01  # neural noise in Gaussian linear filter model
     sigma_c: float = 2.0  # std_dev of log normal Qin et al 2019 odorant model
     W_shape: float = 1.0 
-    W_scale: float = 0.1
+    W_scale: float = 1.0
     nonlinearity: str = "sigmoid log"
     F_max: float = 25.0
     hill_exponent: int = 4
     odor_model: str = "log normal"
-    activity_model: str = "linear filter"
+    activity_model: str = "glomerular convergence"
     loss: str = "jensen_shannon_loss"
     phi: str = "softplus_phi"
     psi: str = "softplus_psi"
+    phi_g: str = "identity"
+    psi_g: str = "identity"
     sigma_kappa_inv: float = 4.0 # this is for Reddy et al. 2018 antagonism model 
     rho: float = 0.0 # ditto
     canonical_init: bool = False 
@@ -49,6 +52,7 @@ class TrainingConfig(NamedTuple):
     epochs_per_scan: int = 100
     gamma_p: float = 0.1
     gamma_T: float = 0.1
+    gamma_g: float = 0.1
     T_hidden_dim: int = 128
     T_mode: str = "inner_product"
 
@@ -65,12 +69,14 @@ class FullConfig(NamedTuple):
     training: TrainingConfig
     logging: LoggingConfig
     seed: int = 0
+    data_path: str = '' 
 
 
 @struct.dataclass
 class Params:
     W: jnp.ndarray
     E: jnp.ndarray
+    G: jnp.ndarray 
     kappa_inv: jnp.ndarray
     eta: (
         jnp.ndarray
@@ -133,12 +139,13 @@ def sigmoid_log(x):
 def initialize_p(rng, hp=None) -> Params:
     if hp is None:
         hp = HyperParams()
-    W_key, E_key, z_key, eta_key = jax.random.split(rng, 4)
+    W_key, E_key, G_key, z_key, eta_key = jax.random.split(rng, 5)
     W = jnp.clip(
         hp.W_scale * jax.random.gamma(W_key, a=hp.W_shape, shape=(hp.M, hp.N)),
         min=1e-9,
         max=1 - 1e-9,
     )
+    phi = PHI_PSI_REGISTRY[hp.phi]
     if hp.canonical_init:
         if hp.balanced_init:
             try:
@@ -150,19 +157,20 @@ def initialize_p(rng, hp=None) -> Params:
                     "For balanced canonical initialization, set L to a postive multiple of M"
                 )
         else:
-            E = create_one_hot_array(E_key, hp.L, hp.M) 
+            E = create_one_hot_array(E_key, hp.L, hp.M)
     else:
-        phi = PHI_PSI_REGISTRY[hp.phi]
         E = phi(
             0.5 + 0.1 * jax.random.normal(E_key, shape=(hp.L, hp.M))
         )  # this is a noncanonical initialization where every neuron expresses roughly the same amount of every receptor.
+    phi_g = PHI_PSI_REGISTRY[hp.phi_g]
+    G = phi_g(0.5 + 0.1 * jax.random.normal(G_key, shape=(hp.K, hp.L))) 
     # kappa_inv = jax.random.lognormal(kappa_inv_key, sigma=sigma_kappa_inv, shape=(hp.M, hp.N)) # see "Olfactory Encoding Model" in Reddy and Zak 2018
     eta = jax.random.lognormal(eta_key, shape=(hp.M, hp.N))
     z = jax.random.normal(z_key, shape=(hp.M, hp.N))
     kappa_inv = jnp.exp(
         hp.sigma_kappa_inv * (hp.rho * jnp.log(eta) + jnp.sqrt(1 - hp.rho**2) * z)
     )
-    return hp, Params(W, E, kappa_inv, eta)
+    return hp, Params(W, E, G, kappa_inv, eta)
 
 
 def initialize_training_state(subkey, hp, p_init, training_config):
@@ -262,6 +270,12 @@ def compute_linear_filter_activity(hp, p, c, subkey):
     nl = NL_REGISTRY[hp.nonlinearity]
     r = nl(c_AMP) + hp.sigma_0 * jax.random.normal(subkey, shape=c_AMP.shape)
     return r
+
+
+def linear_filter_plus_glomerular_layer(hp, p, c, subkey): 
+    r = compute_linear_filter_activity(hp, p, c, subkey)
+    g = p.G @ r 
+    return g 
 
 
 def compute_osn_firing_rate_with_antagonism(hp, p, c):
@@ -377,7 +391,7 @@ def flatten_metrics(metrics_list):
 
 
 @partial(jax.jit, static_argnames=("hp"))
-def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T):
+def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T, gamma_g):
     # Split keys
     key, loss_key = jax.random.split(key)
 
@@ -391,6 +405,9 @@ def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T):
     phi = PHI_PSI_REGISTRY[hp.phi]
     psi = PHI_PSI_REGISTRY[hp.psi]
 
+    phi_g = PHI_PSI_REGISTRY[hp.phi_g]
+    psi_g = PHI_PSI_REGISTRY[hp.psi_g]
+
     mi_estimate, grads = jax.value_and_grad(loss, argnums=(0, 1))(
         p, Tp, hp, cs, loss_key
     )
@@ -403,11 +420,21 @@ def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T):
     #  phi:unconstrained --> constrained, psi is inverse of phi.
     # see https://vene.ro/blog/mirror-descent.html#generalizing-the-projected-gradient-method-with-divergences for a very clear exposition
     U_current = psi(p.E)  # map to dual space
-    U_new = (
-        U_current - gamma_p * grads_p.E
-    )  # grads_p.E is correctly with respect to the primal parameters and evaluated on the primal parameters
+    epsilon = 1e-8  # small value to avoid division by zero
+    grad_norm = jnp.linalg.norm(grads_p.E)
+    normalized_grad = grads_p.E / (grad_norm + epsilon)
+    U_new = U_current - gamma_p * normalized_grad    # grads_p.E is correctly with respect to the primal parameters and evaluated on the primal parameters
+
     E_new = phi(U_new)  # map back to primal space
     p = p.replace(E=E_new)
+
+    # now do this again for glomeruli... 
+    U_current = psi_g(p.G)  # map to dual space
+    grad_norm = jnp.linalg.norm(grads_p.G)
+    normalized_grad = grads_p.G / (grad_norm + epsilon)
+    U_new = U_current - gamma_g * normalized_grad # grads_p.G is correctly with respect to the primal parameters and evaluated on the primal parameters
+    G_new = phi_g(U_new)  # map back to primal space
+    p = p.replace(G=G_new)
 
     return p, Tp, -mi_estimate
 
@@ -445,7 +472,7 @@ def scan_step(state, hp, gammas):
     cs = draw_cs(subkey_odors, hp)
     if hp.loss == "jensen_shannon_loss":
         p_new, Tp_new, mi_estimate = update_params_T(
-            state.p, state.Tp, hp, cs, subkey_loss, gammas[0], gammas[1]
+            state.p, state.Tp, hp, cs, subkey_loss, gammas[0], gammas[1], gammas[2]
         )
     else:
         p_new, mi_estimate = update_params(state.p, hp, cs, subkey_loss, gammas[0])
@@ -507,10 +534,11 @@ def make_alternating_gammas(epochs_per_scan, scans, gamma_T, gamma_p):
     return jnp.array([gamma_ps, gamma_Ts]).T
 
 
-def make_constant_gammas(epochs_per_scan, scans, gamma_T, gamma_p):
+def make_constant_gammas(epochs_per_scan, scans, gamma_T, gamma_p, gamma_g):
     gamma_Ts = [gamma_T] * (epochs_per_scan * scans)
     gamma_ps = [gamma_p] * (epochs_per_scan * scans)
-    return jnp.array([gamma_ps, gamma_Ts]).T
+    gamma_gs = [gamma_g] * (epochs_per_scan * scans)
+    return jnp.array([gamma_ps, gamma_Ts, gamma_gs]).T
 
 
 NL_REGISTRY = {
@@ -523,6 +551,7 @@ NL_REGISTRY = {
 ACTIVITY_FUNCTION_REGISTRY = {
     "linear filter": compute_linear_filter_activity,
     "antagonism": compute_osn_firing_with_antagonism,
+    "glomerular convergence": linear_filter_plus_glomerular_layer
 }
 
 PHI_PSI_REGISTRY = {
@@ -536,6 +565,7 @@ PHI_PSI_REGISTRY = {
     ),
     "positive_phi": jnp.exp,
     "positive_psi": jnp.log,
+    "identity": lambda x: x
 }
 
 LOSS_REGISTRY = {

@@ -113,6 +113,7 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E
         figsize=(18, 10),
         gridspec_kw={"hspace": 0.5}
     )
+    E_init_full, E_final_full = E_init, E_final
     axs["E_final"].sharey(axs["E_init"])
     axs["E_final"].tick_params(labelleft=False)
     axs["E_final"].tick_params(labelbottom=False)
@@ -138,6 +139,7 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E
         im1 = axs["E_init"].imshow(E_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
         im2 = axs["E_final"].imshow(E_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
         cbar_label = r"$\log(E_{ij})$" 
+        
     axs["E_init"].set_title(r"$E_{init}$")
     axs["E_final"].set_title(r"$E_{final}$")
     cbar = fig.colorbar(im1, ax=[axs["E_init"], axs["E_final"]], location="right", pad=0.05)
@@ -149,8 +151,8 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E
         axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
     axs["MI"].set_xlabel("epochs") 
     if metric == 'ratio_max_to_second': 
-        init_ratios = jnp.log(compute_expression_ratios(E_init))
-        final_ratios = jnp.log(compute_expression_ratios(E_final))
+        init_ratios = jnp.log(compute_expression_ratios(E_init_full))
+        final_ratios = jnp.log(compute_expression_ratios(E_final_full))
         axs["hist_init"].hist(
             init_ratios,
             alpha=0.7,
@@ -163,12 +165,12 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E
         )
         ax23_title = r"$\log(\text{expression ratio})$"
     elif metric == 'max_value': 
-        axs['hist_init'].hist(jnp.max(E_init, axis=1))
-        axs['hist_final'].hist(jnp.max(E_final, axis=1))
+        axs['hist_init'].hist(jnp.max(E_init_full, axis=1))
+        axs['hist_final'].hist(jnp.max(E_final_full, axis=1))
         ax23_title = 'row-wise maxima'
     elif metric == 'scatter': 
-        axs['hist_init'] = plot_sorted_values(E_init, axs['hist_init'])
-        axs['hist_final'] = plot_sorted_values(E_final, axs['hist_final'])
+        axs['hist_init'] = plot_sorted_values(E_init_full, axs['hist_init'])
+        axs['hist_final'] = plot_sorted_values(E_final_full, axs['hist_final'])
         ax23_title = 'row-wise maxima'
         axs['hist_init'].legend() 
     # [ax.legend() for ax in [axs["hist_init"], axs["hist_final"]]]
