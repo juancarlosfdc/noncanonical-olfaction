@@ -1,7 +1,7 @@
 import argparse
 import json
 import jax
-import numpy as np
+import jax.numpy as jnp 
 from model import (
     FullConfig,
     HyperParams,
@@ -17,10 +17,12 @@ from model import (
 import model 
 from plotting import (
     plot_expression,
-    plot_G
+    plot_G, 
+    plot_W
 )
 import shutil
 import matplotlib.pyplot as plt 
+import sys 
 
 
 print(jax.default_backend())
@@ -58,14 +60,18 @@ elif hp.odor_model == "block covariance log normal":
         "block covariance log normal": closure_draw_cs_data_driven(config.data_path)[1]
     }
 
+draw_cs = model.ODOR_MODEL_REGISTRY[hp.odor_model]
+activity_function = model.ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
+cs = draw_cs(subkeys[-1], hp)
+norms = jnp.linalg.norm(cs, axis=0)
 
-hp, p_init = initialize_p(subkeys[0], hp=hp)
+hp, p_init = initialize_p(subkeys[0], mean_norm_c=jnp.mean(norms), hp=hp)
 
 init_state = initialize_training_state(subkeys[1], hp, p_init, config.training)
 
 t = config.training
 gammas = make_constant_gammas(
-    t.scans, t.epochs_per_scan, gamma_T=t.gamma_T, gamma_p=t.gamma_p, gamma_g=t.gamma_g
+    t.scans, t.epochs_per_scan, gamma_W=t.gamma_W, gamma_E=t.gamma_E, gamma_G=t.gamma_G, gamma_T=t.gamma_T, 
 )
 
 ### remove after debugging G optimization
@@ -73,6 +79,13 @@ gammas = make_constant_gammas(
 draw_cs = model.ODOR_MODEL_REGISTRY[hp.odor_model]
 activity_function = model.ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
 cs = draw_cs(subkeys[-1], hp)
+r = activity_function(hp, p_init, cs, subkeys[-4])
+plt.imshow(r)
+plt.colorbar() 
+plt.savefig("results/scratch/init_activity.png") 
+
+
+
 g_init = linear_filter_plus_glomerular_layer(hp, p_init, cs, subkeys[-2])
 
 state, metrics = train_natural_gradient_scan_over_epochs(
@@ -81,31 +94,7 @@ state, metrics = train_natural_gradient_scan_over_epochs(
 
 g_final = linear_filter_plus_glomerular_layer(hp, state.p, cs, subkeys[-3])
 
-
-idx = np.random.choice(g_init.shape[1], 120, replace=False)
-
-# Randomly select 120 columns
-idx = np.random.choice(g_init.shape[1], 120, replace=False)
-
-# Set up plots
-fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-
-# Get min/max for consistent color scale
-vmin = min(g_init[:, idx].min(), g_final[:, idx].min())
-vmax = max(g_init[:, idx].max(), g_final[:, idx].max())
-
-# Plot
-im0 = axes[0].imshow(g_init[:, idx], aspect='auto', vmin=vmin, vmax=vmax)
-axes[0].set_title('g_init')
-im1 = axes[1].imshow(g_final[:, idx], aspect='auto', vmin=vmin, vmax=vmax)
-axes[1].set_title('g_final')
-
-# Shared colorbar
-cbar = fig.colorbar(im1, ax=axes, orientation='vertical', fraction=0.02, pad=0.04)
-cbar.set_label('Value')
-
-plt.tight_layout()
-plt.show()
+print(metrics["mi"])
 
 
 
@@ -124,6 +113,9 @@ fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.
 
 fig, axs = plot_G(init_state.p.G, state.p.G, metrics["mi"], hp, t) 
 fig.savefig(f"{config.logging.output_dir}/G_{config.logging.config_id}.png", bbox_inches="tight", dpi=300)
+
+fig, axs = plot_W(init_state.p.W, state.p.W, metrics["mi"], hp, t) 
+fig.savefig(f"{config.logging.output_dir}/W_{config.logging.config_id}.png", bbox_inches="tight", dpi=300)
 
 jax.numpy.save(f"{config.logging.output_dir}/E_final_{config.logging.config_id}", state.p.E)
 jax.numpy.save(f"{config.logging.output_dir}/W_{config.logging.config_id}", state.p.W)

@@ -29,30 +29,35 @@ class HyperParams(NamedTuple):
     sigma_0: float = 0.01  # neural noise in Gaussian linear filter model
     sigma_c: float = 2.0  # std_dev of log normal Qin et al 2019 odorant model
     W_shape: float = 1.0 
-    W_scale: float = 1.0
+    W_scale: str = "1 / ||c||" 
+    W_init: str = "normal"
     nonlinearity: str = "sigmoid log"
     F_max: float = 25.0
     hill_exponent: int = 4
     odor_model: str = "log normal"
     activity_model: str = "glomerular convergence"
     loss: str = "jensen_shannon_loss"
-    phi: str = "softplus_phi"
-    psi: str = "softplus_psi"
+    phi_w: str = "identity"
+    psi_w: str = "identity"
+    phi_e: str = "softplus_phi"
+    psi_e: str = "softplus_psi"
     phi_g: str = "identity"
     psi_g: str = "identity"
     sigma_kappa_inv: float = 4.0 # this is for Reddy et al. 2018 antagonism model 
     rho: float = 0.0 # ditto
-    canonical_init: bool = False 
-    balanced_init: bool = False 
+    canonical_E_init: bool = False 
+    balanced_E_init: bool = False 
+    canonical_G_init: bool = False
     binarize_c_for_MI_computation: bool = False 
 
 
 class TrainingConfig(NamedTuple):
     scans: int = 10
     epochs_per_scan: int = 100
-    gamma_p: float = 0.1
+    gamma_W: float = 0.1
+    gamma_E: float = 0.1
+    gamma_G: float = 0.1
     gamma_T: float = 0.1
-    gamma_g: float = 0.1
     T_hidden_dim: int = 128
     T_mode: str = "inner_product"
 
@@ -133,21 +138,34 @@ def create_one_hot_array(key, L, M):
 
 
 def sigmoid_log(x):
-    return x / (x + 1)
+    return x / (jnp.abs(x) + 1) # for the cases where x can be negative
 
 
-def initialize_p(rng, hp=None) -> Params:
+def initialize_p(rng, mean_norm_c=None, hp=None) -> Params:
     if hp is None:
         hp = HyperParams()
-    W_key, E_key, G_key, z_key, eta_key = jax.random.split(rng, 5)
-    W = jnp.clip(
-        hp.W_scale * jax.random.gamma(W_key, a=hp.W_shape, shape=(hp.M, hp.N)),
-        min=1e-9,
-        max=1 - 1e-9,
-    )
-    phi = PHI_PSI_REGISTRY[hp.phi]
-    if hp.canonical_init:
-        if hp.balanced_init:
+    W_key, E_key, G_key, z_key, eta_key = jax.random.split(rng, 5) # I would like to automatically set the scale based on odorant model... 
+
+    phi_E = PHI_PSI_REGISTRY[hp.phi_e]
+    phi_G = PHI_PSI_REGISTRY[hp.phi_g]
+    phi_W = PHI_PSI_REGISTRY[hp.phi_w]
+
+    if hp.W_init == "gamma": 
+        W = float(hp.W_scale) * phi_W(jnp.clip(
+            jax.random.gamma(W_key, a=hp.W_shape, shape=(hp.M, hp.N)),
+            min=1e-9,
+            max=1 - 1e-9,
+        ))
+    
+    else:
+        if hp.W_scale == "1 / ||c||": 
+            W = (1 / mean_norm_c) * phi_W(jax.random.normal(W_key, shape=(hp.M, hp.N)))
+        
+        elif hp.W_scale == "1 / root(N)": 
+            W = 1 / jnp.sqrt(hp.N) * phi_W(jax.random.normal(W_key, shape=(hp.M, hp.N))) # this is a bad scaling because c is log-normal distributed and sparse 
+
+    if hp.canonical_E_init:
+        if hp.balanced_E_init:
             try:
                 E = jnp.repeat(
                     jnp.eye(hp.M), hp.L // hp.M, axis=0
@@ -159,11 +177,13 @@ def initialize_p(rng, hp=None) -> Params:
         else:
             E = create_one_hot_array(E_key, hp.L, hp.M)
     else:
-        E = phi(
+        E = phi_E(
             0.5 + 0.1 * jax.random.normal(E_key, shape=(hp.L, hp.M))
         )  # this is a noncanonical initialization where every neuron expresses roughly the same amount of every receptor.
-    phi_g = PHI_PSI_REGISTRY[hp.phi_g]
-    G = phi_g(1/hp.L * jax.random.normal(G_key, shape=(hp.K, hp.L))) # this is key. Otherwise the scale of g is enormous compared to r, and loss = 0 no matter what. the signal is swamped. 
+    if hp.canonical_G_init: 
+        G = E.T # this only works if number of receptors (hp.M) == number of glomeruli (hp.K) 
+    else: 
+        G = phi_G(1/hp.L * jax.random.normal(G_key, shape=(hp.K, hp.L))) # this scaling is key. Otherwise the scale of g is enormous compared to r, and loss = 0 no matter what. the signal is swamped. 
     # kappa_inv = jax.random.lognormal(kappa_inv_key, sigma=sigma_kappa_inv, shape=(hp.M, hp.N)) # see "Olfactory Encoding Model" in Reddy and Zak 2018
     eta = jax.random.lognormal(eta_key, shape=(hp.M, hp.N))
     z = jax.random.normal(z_key, shape=(hp.M, hp.N))
@@ -391,10 +411,11 @@ def flatten_metrics(metrics_list):
 
 
 @partial(jax.jit, static_argnames=("hp"))
-def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T, gamma_g):
+def update_params_T(p, Tp, hp, cs, key, gammas):
     # Split keys
     key, loss_key = jax.random.split(key)
-
+    # parse gammas
+    gamma_W, gamma_E, gamma_G, gamma_T = gammas 
     # Compute gradients for MINE network (T) and model params (E)
     if hp.loss != "jensen_shannon_loss":
         raise ValueError(
@@ -402,11 +423,15 @@ def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T, gamma_g):
         )
 
     loss = LOSS_REGISTRY[hp.loss]
-    phi = PHI_PSI_REGISTRY[hp.phi]
-    psi = PHI_PSI_REGISTRY[hp.psi]
 
-    phi_g = PHI_PSI_REGISTRY[hp.phi_g]
-    psi_g = PHI_PSI_REGISTRY[hp.psi_g]
+    phi_W = PHI_PSI_REGISTRY[hp.phi_w]
+    psi_W = PHI_PSI_REGISTRY[hp.psi_w]
+
+    phi_E = PHI_PSI_REGISTRY[hp.phi_e]
+    psi_E = PHI_PSI_REGISTRY[hp.psi_e]
+
+    phi_G = PHI_PSI_REGISTRY[hp.phi_g]
+    psi_G = PHI_PSI_REGISTRY[hp.psi_g]
 
     mi_estimate, grads = jax.value_and_grad(loss, argnums=(0, 1))(
         p, Tp, hp, cs, loss_key
@@ -419,27 +444,37 @@ def update_params_T(p, Tp, hp, cs, key, gamma_p, gamma_T, gamma_g):
     # natural gradient in dual space is equivalent to mirror descent in primal space. A "straight through" trick.
     #  phi:unconstrained --> constrained, psi is inverse of phi.
     # see https://vene.ro/blog/mirror-descent.html#generalizing-the-projected-gradient-method-with-divergences for a very clear exposition
-    U_current = psi(p.E)  # map to dual space
+
+    U_current = psi_W(p.W)  # map to dual space
     epsilon = 1e-8  # small value to avoid division by zero
+    grad_norm = jnp.linalg.norm(grads_p.W)
+    normalized_grad = grads_p.W / (grad_norm + epsilon)
+    U_new = U_current - gamma_W * normalized_grad  
+    W_new = phi_W(U_new)  # map back to primal space
+    p = p.replace(W=W_new)
+
+    # now for expression 
+    U_current = psi_E(p.E)  # map to dual space
+    epsilon = 1e-8  # small value to avoid division by zeroE
     grad_norm = jnp.linalg.norm(grads_p.E)
     normalized_grad = grads_p.E / (grad_norm + epsilon)
-    U_new = U_current - gamma_p * normalized_grad    # grads_p.E is correctly with respect to the primal parameters and evaluated on the primal parameters
-
-    E_new = phi(U_new)  # map back to primal space
+    U_new = U_current - gamma_E * normalized_grad    # grads_p.E is correctly with respect to the primal parameters and evaluated on the primal parameters
+    E_new = phi_E(U_new)  # map back to primal space
     p = p.replace(E=E_new)
 
     # now do this again for glomeruli... 
-    U_current = psi_g(p.G)  # map to dual space
+    U_current = psi_G(p.G)  # map to dual space
     grad_norm = jnp.linalg.norm(grads_p.G)
     normalized_grad = grads_p.G / (grad_norm + epsilon)
-    U_new = U_current - gamma_g * normalized_grad # grads_p.G is correctly with respect to the primal parameters and evaluated on the primal parameters
-    G_new = phi_g(U_new)  # map back to primal space
+    U_new = U_current - gamma_G * normalized_grad # grads_p.G is correctly with respect to the primal parameters and evaluated on the primal parameters
+    G_new = phi_G(U_new)  # map back to primal space
     p = p.replace(G=G_new)
 
     return p, Tp, -mi_estimate
 
 
-def update_params(p, hp, cs, key, gamma_p):
+def update_params(p, hp, cs, key, gamma_E):
+    ''' this is old--comes from estimating MI directly a la Qin et al. 2019, not using the variational formulation '''
     # Split keys
     key, loss_key = jax.random.split(key)
 
@@ -458,7 +493,7 @@ def update_params(p, hp, cs, key, gamma_p):
 
     U_current = psi(p.E)  # map to dual space
     U_new = (
-        U_current - gamma_p * grads_p.E
+        U_current - gamma_E * grads_p.E
     )  # grads_p.E is correctly with respect to the primal parameters and evaluated on the primal parameters
     E_new = phi(U_new)  # map back to primal space
     p = p.replace(E=E_new)
@@ -472,7 +507,7 @@ def scan_step(state, hp, gammas):
     cs = draw_cs(subkey_odors, hp)
     if hp.loss == "jensen_shannon_loss":
         p_new, Tp_new, mi_estimate = update_params_T(
-            state.p, state.Tp, hp, cs, subkey_loss, gammas[0], gammas[1], gammas[2]
+            state.p, state.Tp, hp, cs, subkey_loss, gammas
         )
     else:
         p_new, mi_estimate = update_params(state.p, hp, cs, subkey_loss, gammas[0])
@@ -521,24 +556,25 @@ def train_natural_gradient_scan_over_epochs(
     return initial_state, flatten_metrics(all_metrics)
 
 
-def make_alternating_gammas(epochs_per_scan, scans, gamma_T, gamma_p):
+def make_alternating_gammas(epochs_per_scan, scans, gamma_T, gamma_E):
     gamma_Ts = []
-    gamma_ps = []
+    gamma_Es = []
     for session in range(scans):
         if session % 2 == 0:
             gamma_Ts.extend([gamma_T] * epochs_per_scan)
-            gamma_ps.extend([0.0] * epochs_per_scan)
+            gamma_Es.extend([0.0] * epochs_per_scan)
         else:
             gamma_Ts.extend([0.0] * epochs_per_scan)
-            gamma_ps.extend([gamma_p] * epochs_per_scan)
-    return jnp.array([gamma_ps, gamma_Ts]).T
+            gamma_Es.extend([gamma_E] * epochs_per_scan)
+    return jnp.array([gamma_Es, gamma_Ts]).T
 
 
-def make_constant_gammas(epochs_per_scan, scans, gamma_T, gamma_p, gamma_g):
+def make_constant_gammas(epochs_per_scan, scans, gamma_W, gamma_E, gamma_G, gamma_T):
+    gamma_Ws = [gamma_W] * (epochs_per_scan * scans) 
+    gamma_Es = [gamma_E] * (epochs_per_scan * scans)
+    gamma_Gs = [gamma_G] * (epochs_per_scan * scans)
     gamma_Ts = [gamma_T] * (epochs_per_scan * scans)
-    gamma_ps = [gamma_p] * (epochs_per_scan * scans)
-    gamma_gs = [gamma_g] * (epochs_per_scan * scans)
-    return jnp.array([gamma_ps, gamma_Ts, gamma_gs]).T
+    return jnp.array([gamma_Ws, gamma_Es, gamma_Gs, gamma_Ts]).T
 
 
 NL_REGISTRY = {

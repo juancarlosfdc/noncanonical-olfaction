@@ -70,13 +70,13 @@ def plot_sorted_values(E, ax):
 
 
 def render_parameters(ax_table, hp, t): 
-    keys = ["L", "M", "sigma_0", "W_shape", "sigma_c", "gamma_p", "gamma_g", "gamma_T"]
+    keys = ["L", "M", "sigma_0", "W_shape", "sigma_c", "gamma_E", "gamma_G", "gamma_T"]
     display_keys = {"L": "L", 
                     "M": "M", 
                     "sigma_0": r"$\sigma_0$", 
                     "W_shape": r"$W_{\mathrm{shape}}$", 
-                    "gamma_p": r"$\gamma_p$",
-                    "gamma_g": r"$\gamma_g$",
+                    "gamma_E": r"$\gamma_E$",
+                    "gamma_G": r"$\gamma_G$",
                     "gamma_T": r"$\gamma_T$",
                     "sigma_c": r"$\sigma_c$",
                     "odor_model": "odor model",
@@ -220,6 +220,35 @@ def plot_G(G_init, G_final, mis, hp, t, mi_clip=-1):
     axs["params"] = render_parameters(axs["params"], hp, t) 
     axs["G_init"].set_xlabel("OSNs", labelpad=5)
     axs["G_init"].set_ylabel("glomeruli")
+    return fig, axs 
+
+def plot_W(W_init, W_final, mis, hp, t, mi_clip=-1):
+    mosaic = [["W_init", "W_final", "MI"], [".", ".", "params"]]
+    fig, axs = plt.subplot_mosaic(
+        mosaic, 
+        figsize=(18, 10),
+        gridspec_kw={"hspace": 0.5}
+    )
+    axs["W_init"].imshow(W_init)
+    vmin = min(W_init.min(), W_final.min())
+    vmax = max(W_init.max(), W_final.max()) 
+    threshold = 0.1 * jnp.max(W_final, axis=1)
+    im1 = axs["W_init"].imshow(W_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    im2 = axs["W_final"].imshow(W_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    cbar_label = r"$W_{ij}$"
+    axs["W_init"].set_title(r"$W_{init}$")
+    axs["W_final"].set_title(r"$W_{final}$")
+    cbar = fig.colorbar(im1, ax=[axs["W_init"], axs["W_final"]], location="right", pad=0.05)
+    cbar.ax.set_title(cbar_label, fontsize=16)
+    axs["MI"].plot(jnp.clip(mis, mi_clip))
+    if hp.binarize_c_for_MI_computation: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")
+    else: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
+    axs["MI"].set_xlabel("epochs") 
+    axs["params"] = render_parameters(axs["params"], hp, t) 
+    axs["W_init"].set_xlabel("OSNs", labelpad=5)
+    axs["W_init"].set_ylabel("glomeruli")
     return fig, axs 
 
 def plot_activity(key, hp, p):
