@@ -163,7 +163,7 @@ def initialize_p(rng, hp=None) -> Params:
             0.5 + 0.1 * jax.random.normal(E_key, shape=(hp.L, hp.M))
         )  # this is a noncanonical initialization where every neuron expresses roughly the same amount of every receptor.
     phi_g = PHI_PSI_REGISTRY[hp.phi_g]
-    G = phi_g(0.5 + 0.1 * jax.random.normal(G_key, shape=(hp.K, hp.L))) 
+    G = phi_g(1/hp.L * jax.random.normal(G_key, shape=(hp.K, hp.L))) # this is key. Otherwise the scale of g is enormous compared to r, and loss = 0 no matter what. the signal is swamped. 
     # kappa_inv = jax.random.lognormal(kappa_inv_key, sigma=sigma_kappa_inv, shape=(hp.M, hp.N)) # see "Olfactory Encoding Model" in Reddy and Zak 2018
     eta = jax.random.lognormal(eta_key, shape=(hp.M, hp.N))
     z = jax.random.normal(z_key, shape=(hp.M, hp.N))

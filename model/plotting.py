@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import vmap
 
 
-def plot_activity(p_init, p_final, hp, mis, key):
+def plot_2D_activity(p_init, p_final, hp, mis, key):
     fig, axs = plt.subplots(1, 3, figsize=(18, 5))
     E_init = p_init.E
     E_final = p_final.E
@@ -70,12 +70,13 @@ def plot_sorted_values(E, ax):
 
 
 def render_parameters(ax_table, hp, t): 
-    keys = ["L", "M", "sigma_0", "W_shape", "sigma_c", "gamma_p", "gamma_T"]
+    keys = ["L", "M", "sigma_0", "W_shape", "sigma_c", "gamma_p", "gamma_g", "gamma_T"]
     display_keys = {"L": "L", 
                     "M": "M", 
                     "sigma_0": r"$\sigma_0$", 
                     "W_shape": r"$W_{\mathrm{shape}}$", 
                     "gamma_p": r"$\gamma_p$",
+                    "gamma_g": r"$\gamma_g$",
                     "gamma_T": r"$\gamma_T$",
                     "sigma_c": r"$\sigma_c$",
                     "odor_model": "odor model",
@@ -184,9 +185,52 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E
     axs["params"] = render_parameters(axs["params"], hp, t) 
     return fig, axs
 
+def sort_rows_by_first_threshold(matrix, threshold):
+    first_above_thresh = jnp.argmax(matrix > threshold[:, None], axis=1)
+    all_below_thresh = ~jnp.any(matrix > threshold[:, None], axis=1)
+    first_above_thresh = first_above_thresh.at[all_below_thresh].set(matrix.shape[1])  # Assign a large column index
+    sorted_row_indices = jnp.argsort(first_above_thresh)
+    return sorted_row_indices 
 
-# example call:
-"""
-fig, axs = plot_expression(init_state.p.E, state.p.E,  metrics['mi'])
-fig.savefig('tmp.png')
-"""
+def plot_G(G_init, G_final, mis, hp, t, mi_clip=-1):
+    mosaic = [["G_init", "G_final", "MI"], [".", ".", "params"]]
+    fig, axs = plt.subplot_mosaic(
+        mosaic, 
+        figsize=(18, 10),
+        gridspec_kw={"hspace": 0.5}
+    )
+    axs["G_init"].imshow(G_init)
+    vmin = min(G_init.min(), G_final.min())
+    vmax = max(G_init.max(), G_final.max()) 
+    threshold = 0.1 * jnp.max(G_final, axis=1)
+    indices = sort_rows_by_first_threshold(G_final, threshold)
+    im1 = axs["G_init"].imshow(G_init[indices, :], vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    im2 = axs["G_final"].imshow(G_final[indices, :], vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    cbar_label = r"$G_{ij}$"
+    axs["G_init"].set_title(r"$G_{init}$")
+    axs["G_final"].set_title(r"$G_{final}$")
+    cbar = fig.colorbar(im1, ax=[axs["G_init"], axs["G_final"]], location="right", pad=0.05)
+    cbar.ax.set_title(cbar_label, fontsize=16)
+    axs["MI"].plot(jnp.clip(mis, mi_clip))
+    if hp.binarize_c_for_MI_computation: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")
+    else: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
+    axs["MI"].set_xlabel("epochs") 
+    axs["params"] = render_parameters(axs["params"], hp, t) 
+    axs["G_init"].set_xlabel("OSNs", labelpad=5)
+    axs["G_init"].set_ylabel("glomeruli")
+    return fig, axs 
+
+def plot_activity(key, hp, p):
+    key, *subkeys = jax.random.split(key, 3)
+    draw_cs = ODOR_MODEL_REGISTRY[hp.odor_model]
+    activity_function = ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
+    cs = draw_cs(subkeys[0], hp)
+    r = activity_function(hp, p, cs, subkeys[1])
+    fig, ax = plt.subplots()
+    im = ax.imshow(r, aspect="auto")
+    fig.colorbar(im) 
+    ax.set_xlabel("samples") 
+    ax.set_ylabel("neurons") 
+    fig.suptitle("activity") 

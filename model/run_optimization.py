@@ -15,7 +15,10 @@ from model import (
     linear_filter_plus_glomerular_layer
 )
 import model 
-from plotting import plot_expression 
+from plotting import (
+    plot_expression,
+    plot_G
+)
 import shutil
 import matplotlib.pyplot as plt 
 
@@ -81,15 +84,29 @@ g_final = linear_filter_plus_glomerular_layer(hp, state.p, cs, subkeys[-3])
 
 idx = np.random.choice(g_init.shape[1], 120, replace=False)
 
-# Plot side-by-side heatmaps
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-axes[0].imshow(g_init[:, idx], aspect='auto')
+# Randomly select 120 columns
+idx = np.random.choice(g_init.shape[1], 120, replace=False)
+
+# Set up plots
+fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+
+# Get min/max for consistent color scale
+vmin = min(g_init[:, idx].min(), g_final[:, idx].min())
+vmax = max(g_init[:, idx].max(), g_final[:, idx].max())
+
+# Plot
+im0 = axes[0].imshow(g_init[:, idx], aspect='auto', vmin=vmin, vmax=vmax)
 axes[0].set_title('g_init')
-axes[1].imshow(g_final[:, idx], aspect='auto')
+im1 = axes[1].imshow(g_final[:, idx], aspect='auto', vmin=vmin, vmax=vmax)
 axes[1].set_title('g_final')
+
+# Shared colorbar
+cbar = fig.colorbar(im1, ax=axes, orientation='vertical', fraction=0.02, pad=0.04)
+cbar.set_label('Value')
+
 plt.tight_layout()
 plt.show()
-fig.savefig(f"{config.logging.output_dir}/g_activity_{config.logging.config_id}.png", bbox_inches="tight", dpi=300)
+
 
 
 # fig, ax, *_ = plot_activity(init_state.p, state.p, hp, metrics["mi"], subkeys[2])
@@ -105,7 +122,7 @@ fig.suptitle(figtitle)
 
 fig.savefig(f"{config.logging.output_dir}/expression_{config.logging.config_id}.png", bbox_inches="tight", dpi=300)
 
-fig, axs = plot_expression(init_state.p.G, state.p.G, metrics["mi"], hp, t, key=subkeys[2])
+fig, axs = plot_G(init_state.p.G, state.p.G, metrics["mi"], hp, t) 
 fig.savefig(f"{config.logging.output_dir}/G_{config.logging.config_id}.png", bbox_inches="tight", dpi=300)
 
 jax.numpy.save(f"{config.logging.output_dir}/E_final_{config.logging.config_id}", state.p.E)
