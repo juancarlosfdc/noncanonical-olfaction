@@ -15,22 +15,24 @@ from flax import struct
 from functools import partial 
 
 plt.rcParams["font.size"] = 20
-DATA_PATH = "../rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
+DATA_PATH = "/n/home10/jfernandezdelcasti/noncanonical-olfaction/rbm/mm_synthetic_data_non_zero_samples_9_April_2025.npy"
 
 
 class HyperParams(NamedTuple):
     N: int = 100  # number of odorants. this needs to match the number of variables (rows) in the data when using the data driven model.
-    n: int = 2  # sparsity of odor vectors--only applies for the Qin et al 2019 odor model
+    n: int = 2  # sparsity of odor vectors--only applies for the Qin et al 2019 odor model, which we do not use. 
     M: int = 30  # number of odorant receptors
     L: int = 300  # number of olfactory receptor neurons
     P: int = 1000  # number of samples when we compute MI
-    K: int = 50 # number of glomeruli (only relevant if computing with glomerular convergence)
+    K: int = 30 # number of glomeruli (only relevant if computing with glomerular convergence)
     window: int = 32  # this should be set to jnp.round(jnp.sqrt(P) + 0.5).astype(int) but doing this dynamically makes hp not hashable. So change it when you change P!
-    sigma_0: float = 0.01  # neural noise in Gaussian linear filter model
+    sigma_0: float = 0.1  # neural noise in Gaussian linear filter model
     sigma_c: float = 2.0  # std_dev of log normal Qin et al 2019 odorant model
+    mu_c: float = 3.0 # mean of log normal odorant distribution. This doesn't matter mathematically, but making the odorants large helps the W optimization. 
     W_shape: float = 1.0 
     W_scale: str = "1 / ||c||" 
     W_init: str = "normal"
+    kappa_inv_eta_init: str = "normal"
     nonlinearity: str = "sigmoid log"
     F_max: float = 25.0
     hill_exponent: int = 4
@@ -43,13 +45,19 @@ class HyperParams(NamedTuple):
     psi_e: str = "softplus_psi"
     phi_g: str = "identity"
     psi_g: str = "identity"
+    phi_kappa_inv: str = "bounded_phi"
+    psi_kappa_inv: str = "bounded_psi"
+    phi_eta: str = "bounded_phi"
+    psi_eta: str = "bounded_psi"
     sigma_kappa_inv: float = 4.0 # this is for Reddy et al. 2018 antagonism model 
     rho: float = 0.0 # ditto
     canonical_E_init: bool = False 
     balanced_E_init: bool = False 
     canonical_G_init: bool = False
+    read_in_G: bool = False 
     binarize_c_for_MI_computation: bool = False 
-
+    W_path: str = "/n/home10/jfernandezdelcasti/noncanonical-olfaction/model/results/scratch/W_final_0.npy" # only applies if W_init == "read in"
+    G_path: str = "/n/home10/jfernandezdelcasti/noncanonical-olfaction/model/results/glomerular_convergence/G_final_0.npy" # only applies if read_in_G == True 
 
 class TrainingConfig(NamedTuple):
     scans: int = 10
@@ -57,6 +65,8 @@ class TrainingConfig(NamedTuple):
     gamma_W: float = 0.1
     gamma_E: float = 0.1
     gamma_G: float = 0.1
+    gamma_kappa_inv: float = 0.1
+    gamma_eta: float = 0.1
     gamma_T: float = 0.1
     T_hidden_dim: int = 128
     T_mode: str = "inner_product"
@@ -83,9 +93,7 @@ class Params:
     E: jnp.ndarray
     G: jnp.ndarray 
     kappa_inv: jnp.ndarray
-    eta: (
-        jnp.ndarray
-    )  # these are not going to be changed during training, but you can't hash a tuple with jax arrays, so here they shall live.
+    eta: jnp.ndarray
 
 
 class T_estimator(nn.Module):
@@ -141,14 +149,16 @@ def sigmoid_log(x):
     return x / (jnp.abs(x) + 1) # for the cases where x can be negative
 
 
-def initialize_p(rng, mean_norm_c=None, hp=None) -> Params:
+def initialize_p(rng, mean_norm_c=None, threshold=None, hp=None) -> Params:
     if hp is None:
         hp = HyperParams()
-    W_key, E_key, G_key, z_key, eta_key = jax.random.split(rng, 5) # I would like to automatically set the scale based on odorant model... 
+    W_key, E_key, G_key, z_key, eta_key = jax.random.split(rng, 5) 
 
     phi_E = PHI_PSI_REGISTRY[hp.phi_e]
     phi_G = PHI_PSI_REGISTRY[hp.phi_g]
     phi_W = PHI_PSI_REGISTRY[hp.phi_w]
+    phi_kappa_inv = PHI_PSI_REGISTRY[hp.phi_kappa_inv]
+    phi_eta = PHI_PSI_REGISTRY[hp.phi_eta]
 
     if hp.W_init == "gamma": 
         W = float(hp.W_scale) * phi_W(jnp.clip(
@@ -157,12 +167,19 @@ def initialize_p(rng, mean_norm_c=None, hp=None) -> Params:
             max=1 - 1e-9,
         ))
     
-    else:
+    elif hp.W_init == "read in": 
+        W = jnp.load(hp.W_path)
+
+    elif hp.W_init == "normal":
         if hp.W_scale == "1 / ||c||": 
             W = (1 / mean_norm_c) * phi_W(jax.random.normal(W_key, shape=(hp.M, hp.N)))
         
+        if hp.W_scale == "threshold": 
+            W = threshold * phi_W(jax.random.normal(W_key, shape=(hp.M, hp.N)))
+            
         elif hp.W_scale == "1 / root(N)": 
             W = 1 / jnp.sqrt(hp.N) * phi_W(jax.random.normal(W_key, shape=(hp.M, hp.N))) # this is a bad scaling because c is log-normal distributed and sparse 
+
 
     if hp.canonical_E_init:
         if hp.balanced_E_init:
@@ -182,14 +199,23 @@ def initialize_p(rng, mean_norm_c=None, hp=None) -> Params:
         )  # this is a noncanonical initialization where every neuron expresses roughly the same amount of every receptor.
     if hp.canonical_G_init: 
         G = E.T # this only works if number of receptors (hp.M) == number of glomeruli (hp.K) 
+    elif hp.read_in_G: 
+        G = jnp.load(hp.G_path)
     else: 
         G = phi_G(1/hp.L * jax.random.normal(G_key, shape=(hp.K, hp.L))) # this scaling is key. Otherwise the scale of g is enormous compared to r, and loss = 0 no matter what. the signal is swamped. 
-    # kappa_inv = jax.random.lognormal(kappa_inv_key, sigma=sigma_kappa_inv, shape=(hp.M, hp.N)) # see "Olfactory Encoding Model" in Reddy and Zak 2018
-    eta = jax.random.lognormal(eta_key, shape=(hp.M, hp.N))
-    z = jax.random.normal(z_key, shape=(hp.M, hp.N))
-    kappa_inv = jnp.exp(
-        hp.sigma_kappa_inv * (hp.rho * jnp.log(eta) + jnp.sqrt(1 - hp.rho**2) * z)
-    )
+    if hp.kappa_inv_eta_init == "normal": 
+        kappa_inv = phi_kappa_inv(jax.random.normal(eta_key, shape=(hp.M, hp.N)))
+        eta = phi_eta(jax.random.normal(z_key, shape=(hp.M, hp.N)))
+    elif hp.kappa_inv_eta_init == "near zero": 
+        kappa_inv = phi_kappa_inv(jax.random.normal(eta_key, shape=(hp.M, hp.N)) - 5)
+        eta = phi_eta(jax.random.normal(z_key, shape=(hp.M, hp.N)) - 5)
+    else: # kappa_inv = jax.random.lognormal(kappa_inv_key, sigma=sigma_kappa_inv, shape=(hp.M, hp.N)) # see "Olfactory Encoding Model" in Reddy and Zak 2018
+        eta = jax.random.lognormal(eta_key, shape=(hp.M, hp.N))
+        z = jax.random.normal(z_key, shape=(hp.M, hp.N))
+        kappa_inv = jnp.exp(
+            hp.sigma_kappa_inv * (hp.rho * jnp.log(eta) + jnp.sqrt(1 - hp.rho**2) * z)
+        )
+        # kappa_inv and eta are now both positive, so no need to pass them through phi
     return hp, Params(W, E, G, kappa_inv, eta)
 
 
@@ -211,28 +237,11 @@ def initialize_training_state(subkey, hp, p_init, training_config):
     return init_state
 
 
-def phi(u):
-    return 1 / (1 + jnp.exp(-u))
-
-
-def psi(x):
-    x = jnp.clip(x, min=1e-6, max=1 - 1e-6)
-    return jnp.log(x / (1 - x))
-
-
-def phi(u):
-    return jax.nn.softmax(u, axis=1)
-
-
-def psi(x):
-    return jnp.log(jnp.clip(x, min=1e-6, max=1 - 1e-6))
-
-
 def draw_c_sparse_log_normal(subkey, hp):
     c = jnp.zeros(hp.N)
     sub1, sub2 = jax.random.split(subkey)
     non_zero_indices = jax.random.choice(sub1, hp.N, shape=(hp.n,), replace=False)
-    concentrations = jax.random.lognormal(sub2, sigma=hp.sigma_c, shape=(hp.n,))
+    concentrations = jnp.exp(hp.mu_c) * jax.random.lognormal(sub2, sigma=hp.sigma_c, shape=(hp.n,))
     c = c.at[non_zero_indices].set(concentrations)
     return c
 
@@ -260,7 +269,7 @@ def closure_draw_cs_data_driven(
         batch = jax.device_put(loaded_data[:, idx])  # move to device only once per call
         batch = jnp.where(
             batch,
-            jax.random.lognormal(
+            jnp.exp(hp.mu_c) * jax.random.lognormal(
                 subkey_concentration, sigma=hp.sigma_c, shape=batch.shape
             ),
             jnp.zeros(batch.shape),
@@ -415,7 +424,7 @@ def update_params_T(p, Tp, hp, cs, key, gammas):
     # Split keys
     key, loss_key = jax.random.split(key)
     # parse gammas
-    gamma_W, gamma_E, gamma_G, gamma_T = gammas 
+    gamma_W, gamma_E, gamma_G, gamma_kappa_inv, gamma_eta, gamma_T = gammas 
     # Compute gradients for MINE network (T) and model params (E)
     if hp.loss != "jensen_shannon_loss":
         raise ValueError(
@@ -426,12 +435,14 @@ def update_params_T(p, Tp, hp, cs, key, gammas):
 
     phi_W = PHI_PSI_REGISTRY[hp.phi_w]
     psi_W = PHI_PSI_REGISTRY[hp.psi_w]
-
     phi_E = PHI_PSI_REGISTRY[hp.phi_e]
     psi_E = PHI_PSI_REGISTRY[hp.psi_e]
-
     phi_G = PHI_PSI_REGISTRY[hp.phi_g]
     psi_G = PHI_PSI_REGISTRY[hp.psi_g]
+    phi_kappa_inv = PHI_PSI_REGISTRY[hp.phi_kappa_inv]
+    psi_kappa_inv = PHI_PSI_REGISTRY[hp.psi_kappa_inv]
+    phi_eta = PHI_PSI_REGISTRY[hp.phi_eta]
+    psi_eta = PHI_PSI_REGISTRY[hp.psi_eta]
 
     mi_estimate, grads = jax.value_and_grad(loss, argnums=(0, 1))(
         p, Tp, hp, cs, loss_key
@@ -445,30 +456,32 @@ def update_params_T(p, Tp, hp, cs, key, gammas):
     #  phi:unconstrained --> constrained, psi is inverse of phi.
     # see https://vene.ro/blog/mirror-descent.html#generalizing-the-projected-gradient-method-with-divergences for a very clear exposition
 
-    U_current = psi_W(p.W)  # map to dual space
-    epsilon = 1e-8  # small value to avoid division by zero
-    grad_norm = jnp.linalg.norm(grads_p.W)
-    normalized_grad = grads_p.W / (grad_norm + epsilon)
-    U_new = U_current - gamma_W * normalized_grad  
-    W_new = phi_W(U_new)  # map back to primal space
-    p = p.replace(W=W_new)
 
-    # now for expression 
-    U_current = psi_E(p.E)  # map to dual space
-    epsilon = 1e-8  # small value to avoid division by zeroE
-    grad_norm = jnp.linalg.norm(grads_p.E)
-    normalized_grad = grads_p.E / (grad_norm + epsilon)
-    U_new = U_current - gamma_E * normalized_grad    # grads_p.E is correctly with respect to the primal parameters and evaluated on the primal parameters
-    E_new = phi_E(U_new)  # map back to primal space
-    p = p.replace(E=E_new)
+    def update_param(p, param_name, psi, phi, grads, gamma, epsilon=1e-8):
+        # Map to dual space
+        U_current = psi(getattr(p, param_name))
+        
+        # Normalize the gradient
+        grad = getattr(grads, param_name)
+        grad_norm = jnp.linalg.norm(grad)
+        normalized_grad = grad / (grad_norm + epsilon)
+        
+        # Gradient step in dual space
+        U_new = U_current - gamma * normalized_grad
+        
+        # Map back to primal space
+        new_value = phi(U_new)
+        
+        # Replace in parameter object
+        return p.replace(**{param_name: new_value})
 
-    # now do this again for glomeruli... 
-    U_current = psi_G(p.G)  # map to dual space
-    grad_norm = jnp.linalg.norm(grads_p.G)
-    normalized_grad = grads_p.G / (grad_norm + epsilon)
-    U_new = U_current - gamma_G * normalized_grad # grads_p.G is correctly with respect to the primal parameters and evaluated on the primal parameters
-    G_new = phi_G(U_new)  # map back to primal space
-    p = p.replace(G=G_new)
+
+    # Apply update for each parameter
+    p = update_param(p, "W", psi_W, phi_W, grads_p, gamma_W)
+    p = update_param(p, "E", psi_E, phi_E, grads_p, gamma_E)
+    p = update_param(p, "G", psi_G, phi_G, grads_p, gamma_G)
+    p = update_param(p, "kappa_inv", psi_kappa_inv, phi_kappa_inv, grads_p, gamma_kappa_inv)
+    p = update_param(p, "eta", psi_eta, phi_eta, grads_p, gamma_eta)
 
     return p, Tp, -mi_estimate
 
@@ -512,7 +525,7 @@ def scan_step(state, hp, gammas):
     else:
         p_new, mi_estimate = update_params(state.p, hp, cs, subkey_loss, gammas[0])
         Tp_new = 0
-    new_metrics = {"mi": mi_estimate}
+    new_metrics = {"mi": mi_estimate.astype(float)}
     return TrainingState(p_new, Tp_new, key, new_metrics), new_metrics
 
 
@@ -536,7 +549,11 @@ def scan_phase(state, hp, gammas, epochs_per_scan):
 def train_natural_gradient_scan_over_epochs(
     initial_state, hp, gammas, scans=2, epochs_per_scan=2
 ):
-    all_metrics = []
+    num_total_epochs = scans * epochs_per_scan
+    metrics_store = {
+        "mi": jnp.zeros(num_total_epochs)
+    }
+    epoch_counter = 0 
     for scan_idx in range(scans):
         # Run scanned phase
         scan_gammas = gammas[
@@ -545,36 +562,27 @@ def train_natural_gradient_scan_over_epochs(
         state, scan_metrics = scan_phase(
             initial_state, hp, scan_gammas, epochs_per_scan
         )
-        scan_metrics = jax.device_get(scan_metrics)  # Move from device to host
+        scan_metrics = jax.device_get(scan_metrics)  # ensure it’s on host
+        mi_vals = scan_metrics["mi"]  # shape: (epochs_per_scan,)
+        metrics_store["mi"] = metrics_store["mi"].at[epoch_counter:epoch_counter + epochs_per_scan].set(mi_vals)
+        epoch_counter += epochs_per_scan
 
-        all_metrics.append(scan_metrics)
         if scan_idx % 1 == 0:
             avg_mi = jnp.mean(jnp.array(scan_metrics["mi"]))
             print(f"Scan {scan_idx}: Avg MI {avg_mi:.3f}")
         initial_state = state
 
-    return initial_state, flatten_metrics(all_metrics)
+    return initial_state, metrics_store
 
 
-def make_alternating_gammas(epochs_per_scan, scans, gamma_T, gamma_E):
-    gamma_Ts = []
-    gamma_Es = []
-    for session in range(scans):
-        if session % 2 == 0:
-            gamma_Ts.extend([gamma_T] * epochs_per_scan)
-            gamma_Es.extend([0.0] * epochs_per_scan)
-        else:
-            gamma_Ts.extend([0.0] * epochs_per_scan)
-            gamma_Es.extend([gamma_E] * epochs_per_scan)
-    return jnp.array([gamma_Es, gamma_Ts]).T
-
-
-def make_constant_gammas(epochs_per_scan, scans, gamma_W, gamma_E, gamma_G, gamma_T):
+def make_constant_gammas(epochs_per_scan, scans, gamma_W, gamma_E, gamma_G, gamma_kappa_inv, gamma_eta, gamma_T):
     gamma_Ws = [gamma_W] * (epochs_per_scan * scans) 
     gamma_Es = [gamma_E] * (epochs_per_scan * scans)
     gamma_Gs = [gamma_G] * (epochs_per_scan * scans)
+    gamma_kappa_invs = [gamma_kappa_inv] * (epochs_per_scan * scans)
+    gamma_etas = [gamma_eta] * (epochs_per_scan * scans)
     gamma_Ts = [gamma_T] * (epochs_per_scan * scans)
-    return jnp.array([gamma_Ws, gamma_Es, gamma_Gs, gamma_Ts]).T
+    return jnp.array([gamma_Ws, gamma_Es, gamma_Gs, gamma_kappa_invs, gamma_etas, gamma_Ts]).T
 
 
 NL_REGISTRY = {

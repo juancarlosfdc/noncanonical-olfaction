@@ -70,11 +70,12 @@ def plot_sorted_values(E, ax):
 
 
 def render_parameters(ax_table, hp, t): 
-    keys = ["L", "M", "sigma_0", "W_shape", "sigma_c", "gamma_E", "gamma_G", "gamma_T"]
+    keys = ["L", "M", "sigma_0", "W_shape", "sigma_c", "gamma_W", "gamma_E", "gamma_G", "gamma_T"]
     display_keys = {"L": "L", 
                     "M": "M", 
                     "sigma_0": r"$\sigma_0$", 
                     "W_shape": r"$W_{\mathrm{shape}}$", 
+                    "gamma_W": r"$\gamma_W$",
                     "gamma_E": r"$\gamma_E$",
                     "gamma_G": r"$\gamma_G$",
                     "gamma_T": r"$\gamma_T$",
@@ -107,7 +108,7 @@ def render_parameters(ax_table, hp, t):
     return ax_table 
 
 
-def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E_clip=1e-4, log_scale=True, key=None): 
+def plot_E(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E_clip=1e-4, log_scale=True, key=None): 
     mosaic = [["E_init", "E_final", "MI"], ["hist_init", "hist_final", "params"]]
     fig, axs = plt.subplot_mosaic(
         mosaic, 
@@ -126,20 +127,24 @@ def plot_expression(E_init, E_final, mis, hp, t, metric='scatter', mi_clip=-1, E
         axs["E_init"].set_ylabel("ORNs (downsampled)")
     else: 
         axs["E_init"].set_ylabel("ORNs")
+    threshold = 0.1 * jnp.max(E_final, axis=1)
+    indices = sort_rows_by_first_threshold(E_final, threshold) 
     if log_scale: 
+        E_init = jnp.maximum(E_init, E_clip)
         E_final = jnp.maximum(E_final, E_clip)
         vmin = jnp.log10(min(E_init.min(), E_final.min())) 
         vmax = jnp.log10(max(E_init.max(), E_final.max())) # good ole log is monotonic 
-        im1 = axs["E_init"].imshow(jnp.log10(E_init), vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
-        im2 = axs["E_final"].imshow(jnp.log10(E_final), vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+        im1 = axs["E_init"].imshow(jnp.log10(E_init[indices, :]), vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest", cmap="Blues")
+        im2 = axs["E_final"].imshow(jnp.log10(E_final[indices, :]), vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest", cmap="Blues")
         cbar_label = r"$\log_{10}(E_{ij})$"
     else: 
+        E_init = jnp.maximum(E_init, E_clip) 
         E_final = jnp.maximum(E_final, E_clip)
         vmin = min(E_init.min(), E_final.min())
         vmax = max(E_init.max(), E_final.max()) 
-        im1 = axs["E_init"].imshow(E_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
-        im2 = axs["E_final"].imshow(E_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
-        cbar_label = r"$\log(E_{ij})$" 
+        im1 = axs["E_init"].imshow(E_init[indices, :], vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest", cmap="Blues")
+        im2 = axs["E_final"].imshow(E_final[indices, :], vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest", cmap="Blues")
+        cbar_label = r"$E_{ij}$" 
         
     axs["E_init"].set_title(r"$E_{init}$")
     axs["E_final"].set_title(r"$E_{final}$")
@@ -222,7 +227,7 @@ def plot_G(G_init, G_final, mis, hp, t, mi_clip=-1):
     axs["G_init"].set_ylabel("glomeruli")
     return fig, axs 
 
-def plot_W(W_init, W_final, mis, hp, t, mi_clip=-1):
+def plot_W(W_init, W_final, mis, hp, t, mi_clip=-1, key=None):
     mosaic = [["W_init", "W_final", "MI"], [".", ".", "params"]]
     fig, axs = plt.subplot_mosaic(
         mosaic, 
@@ -232,7 +237,10 @@ def plot_W(W_init, W_final, mis, hp, t, mi_clip=-1):
     axs["W_init"].imshow(W_init)
     vmin = min(W_init.min(), W_final.min())
     vmax = max(W_init.max(), W_final.max()) 
-    threshold = 0.1 * jnp.max(W_final, axis=1)
+    if W_init.shape[1] > 2 * W_init.shape[0]: 
+        indices = jax.random.permutation(key, W_init.shape[1])[:2*W_init.shape[0]]
+        W_init = W_init[:, indices]
+        W_final = W_final[:, indices]
     im1 = axs["W_init"].imshow(W_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
     im2 = axs["W_final"].imshow(W_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
     cbar_label = r"$W_{ij}$"
@@ -247,19 +255,136 @@ def plot_W(W_init, W_final, mis, hp, t, mi_clip=-1):
         axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
     axs["MI"].set_xlabel("epochs") 
     axs["params"] = render_parameters(axs["params"], hp, t) 
-    axs["W_init"].set_xlabel("OSNs", labelpad=5)
-    axs["W_init"].set_ylabel("glomeruli")
+    axs["W_init"].set_xlabel("odorants", labelpad=5)
+    axs["W_init"].set_ylabel("receptors")
     return fig, axs 
 
-def plot_activity(key, hp, p):
-    key, *subkeys = jax.random.split(key, 3)
-    draw_cs = ODOR_MODEL_REGISTRY[hp.odor_model]
-    activity_function = ACTIVITY_FUNCTION_REGISTRY[hp.activity_model]
-    cs = draw_cs(subkeys[0], hp)
-    r = activity_function(hp, p, cs, subkeys[1])
-    fig, ax = plt.subplots()
-    im = ax.imshow(r, aspect="auto")
-    fig.colorbar(im) 
-    ax.set_xlabel("samples") 
-    ax.set_ylabel("neurons") 
-    fig.suptitle("activity") 
+def plot_r(r_init, r_final, mis, hp, p_init, p_final, t, activity_function, mi_clip=-1, key=None, first_n_odorants=100):
+    mosaic = [["r_init", "r_final", "MI"], ["init_tuning_curves", "final_tuning_curves", "params"]]
+    fig, axs = plt.subplot_mosaic(
+        mosaic, 
+        figsize=(18, 10),
+        gridspec_kw={"hspace": 0.5}
+    )
+    axs["r_init"].imshow(r_init)
+    vmin = min(r_init.min(), r_final.min())
+    vmax = max(r_init.max(), r_final.max()) 
+    if r_init.shape[1] > 2 * r_init.shape[0]: 
+        indices = jax.random.permutation(key, r_init.shape[1])[:2*r_init.shape[0]]
+        r_init = r_init[:, indices]
+        r_final = r_final[:, indices]
+    im1 = axs["r_init"].imshow(r_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    im2 = axs["r_final"].imshow(r_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    cbar_label = r"$r_{ij}$"
+    axs["r_init"].set_title(r"$r_{init}$")
+    axs["r_final"].set_title(r"$r_{final}$")
+    cbar = fig.colorbar(im1, ax=[axs["r_init"], axs["r_final"]], location="right", pad=0.05)
+    cbar.ax.set_title(cbar_label, fontsize=16)
+    axs["MI"].plot(jnp.clip(mis, mi_clip))
+    if hp.binarize_c_for_MI_computation: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")
+    else: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
+    axs["MI"].set_xlabel("epochs") 
+    axs["params"] = render_parameters(axs["params"], hp, t) 
+    axs["r_init"].set_xlabel("samples", labelpad=5)
+    axs["r_init"].set_ylabel("neurons")
+    key, subkey = jax.random.split(key)
+    axs["init_tuning_curves"] = plot_tuning_curves(key, hp, p_init, activity_function, axs["init_tuning_curves"], first_n_odorants)
+    axs["init_tuning_curves"].set_xlabel("odorants (sorted)")
+    axs["init_tuning_curves"].set_ylabel("activity")
+    axs["init_tuning_curves"].set_title("initial tuning curves")
+    axs["final_tuning_curves"].set_title("final tuning curves")
+    axs["final_tuning_curves"] = plot_tuning_curves(subkey, hp, p_final, activity_function, axs["final_tuning_curves"], first_n_odorants)
+    axs["final_tuning_curves"].sharey(axs["init_tuning_curves"])
+    return fig, axs 
+
+
+def plot_tuning_curves(key, hp, p, activity_function, ax, first_n_odorants=100):
+    key, subkey = jax.random.split(key)  
+    r = activity_function(hp, p, jnp.eye(hp.N), subkey) # one-odorant odor mixtures, all at the same concentration. For a linear filter model, this returns W. 
+    sorted_rs = jnp.sort(r, axis=1)[:, ::-1][:, :first_n_odorants]
+    for i in range(len(sorted_rs)):
+        if i == 0:
+            line = ax.plot(sorted_rs[i], alpha=0.5)
+            first_color = line[0].get_color()  # Get the color of the first line
+        else:
+            ax.plot(sorted_rs[i], color=first_color, alpha=0.1)
+    return ax 
+
+def plot_tuning_histograms(key, hp, p, activity_function, ax, subsample=100):
+    key, subkey_activity, subkey_sample = jax.random.split(key, 3)  
+    r = activity_function(hp, p, jnp.eye(hp.N), subkey_activity) # one-odorant odor mixtures, all at the same concentration. For a linear filter model, this returns W. 
+    indices = jax.random.permutation(subkey_sample, r.shape[1])[:subsample]
+    sorted_rs = jnp.sort(r, axis=1)[:, ::-1][:, indices]
+    for i in range(len(sorted_rs)):
+        if i == 0:
+            line = ax.plot(sorted_rs[i], alpha=0.5)
+            first_color = line[0].get_color()  # Get the color of the first line
+        else:
+            ax.plot(sorted_rs[i], color=first_color, alpha=0.1)
+    return ax 
+
+def plot_kappa_inv(kappa_inv_init, kappa_inv_final, mis, hp, t, mi_clip=-1, key=None):
+    mosaic = [["kappa_inv_init", "kappa_inv_final", "MI"], [".", ".", "params"]]
+    fig, axs = plt.subplot_mosaic(
+        mosaic, 
+        figsize=(18, 10),
+        gridspec_kw={"hspace": 0.5}
+    )
+    axs["kappa_inv_init"].imshow(kappa_inv_init)
+    vmin = min(kappa_inv_init.min(), kappa_inv_final.min())
+    vmax = max(kappa_inv_init.max(), kappa_inv_final.max()) 
+    if kappa_inv_init.shape[1] > 2 * kappa_inv_init.shape[0]: 
+        indices = jax.random.permutation(key, kappa_inv_init.shape[1])[:2*kappa_inv_init.shape[0]]
+        kappa_inv_init = kappa_inv_init[:, indices]
+        kappa_inv_final = kappa_inv_final[:, indices]
+    im1 = axs["kappa_inv_init"].imshow(kappa_inv_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    im2 = axs["kappa_inv_final"].imshow(kappa_inv_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    cbar_label = r"$kappa_inv_{ij}$"
+    axs["kappa_inv_init"].set_title(r"$kappa_inv_{init}$")
+    axs["kappa_inv_final"].set_title(r"$kappa_inv_{final}$")
+    cbar = fig.colorbar(im1, ax=[axs["kappa_inv_init"], axs["kappa_inv_final"]], location="right", pad=0.05)
+    cbar.ax.set_title(cbar_label, fontsize=16)
+    axs["MI"].plot(jnp.clip(mis, mi_clip))
+    if hp.binarize_c_for_MI_computation: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")
+    else: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
+    axs["MI"].set_xlabel("epochs") 
+    axs["params"] = render_parameters(axs["params"], hp, t) 
+    axs["kappa_inv_init"].set_xlabel("odorants", labelpad=5)
+    axs["kappa_inv_init"].set_ylabel("receptors")
+    return fig, axs 
+
+def plot_eta(eta_init, eta_final, mis, hp, t, mi_clip=-1, key=None):
+    mosaic = [["eta_init", "eta_final", "MI"], [".", ".", "params"]]
+    fig, axs = plt.subplot_mosaic(
+        mosaic, 
+        figsize=(18, 10),
+        gridspec_kw={"hspace": 0.5}
+    )
+    axs["eta_init"].imshow(eta_init)
+    vmin = min(eta_init.min(), eta_final.min())
+    vmax = max(eta_init.max(), eta_final.max()) 
+    if eta_init.shape[1] > 2 * eta_init.shape[0]: 
+        indices = jax.random.permutation(key, eta_init.shape[1])[:2*eta_init.shape[0]]
+        eta_init = eta_init[:, indices]
+        eta_final = eta_final[:, indices]
+    im1 = axs["eta_init"].imshow(eta_init, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    im2 = axs["eta_final"].imshow(eta_final, vmin=vmin, vmax=vmax, aspect="auto", interpolation="nearest")
+    cbar_label = r"$W_{ij}$"
+    axs["eta_init"].set_title(r"$eta_{init}$")
+    axs["eta_final"].set_title(r"$eta_{final}$")
+    cbar = fig.colorbar(im1, ax=[axs["eta_init"], axs["eta_final"]], location="right", pad=0.05)
+    cbar.ax.set_title(cbar_label, fontsize=16)
+    axs["MI"].plot(jnp.clip(mis, mi_clip))
+    if hp.binarize_c_for_MI_computation: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c_{{bin}})$ (clip={mi_clip})")
+    else: 
+        axs["MI"].set_title(fr"$\widehat{{MI_{{\mathrm{{JSD}}}}}}(r;\ c)$ (clip={mi_clip})")
+    axs["MI"].set_xlabel("epochs") 
+    axs["params"] = render_parameters(axs["params"], hp, t) 
+    axs["eta_init"].set_xlabel("odorants", labelpad=5)
+    axs["eta_init"].set_ylabel("receptors")
+    return fig, axs 
